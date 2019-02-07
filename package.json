@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "http": "0.0.0",
+    "moment": "^2.22.0",
+    "mongodb": "^3.0.5",
+    "node-jquery-deparam": "0.0.3",
+    "npm": "^5.10.0"
+  }
+}
