@@ -5,19 +5,7 @@
  */
 
 // webserver configurations
-const configs = {
-  local: {
-    http: {
-      port: 3000
-    },
-    domain: 'localhost',
-    max_data_size: 16777216,
-    mongo: {
-      uri: "mongodb://localhost",
-      port: "27017"
-    }
-  }
-};
+const configs = require("./configs");
 
 // used webserver configuration
 const config = configs.local;
