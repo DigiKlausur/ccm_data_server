@@ -1,0 +1,51 @@
+{
+  "admin": {
+    "id": "admin",
+    "name": "Admin",
+    "description": "",
+    "permissions": [
+      {
+        "id": "%all%",
+        "operations": [ "get", "set", "del" ]
+      }
+    ]
+  },
+
+  "grader": {
+    "id": "grader",
+    "name": "Grader",
+    "description": "",
+    "permissions": [
+      {
+        "id": "%all%",
+        "operations": [ "get" ]
+      },
+      {
+        "id": "questions",
+        "operations": [ "get", "set" ]
+      },
+      {
+        "id": "%user%",
+        "operations": [ "get", "set", "del" ]
+      }
+    ]
+  },
+
+  "student": {
+    "id": "student",
+    "name": "Student",
+    "description": "",
+    "permissions": [
+      {
+        "id": "questions",
+        "operations": [ "get" ]
+      },
+      {
+        "id": "%user%",
+        "operations": [ "get", "set" ]
+      }
+    ]
+  },
+
+  "default": "student"
+}

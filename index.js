@@ -1,32 +1,23 @@
 /**
  * @overview NodeJS webserver for server-side ccm data management via HTTP using MongoDB
- * @author André Kless <andre.kless@web.de> 2018-2019
+ * @author Minh Nguyen <minh.nguyen@smail.inf.h-brs.de> 2018-2019
+ * @description customize the implementation at https://github.com/ccmjs/data-server for the DigiKlausur project
  * @license MIT License
  */
 
-// webserver configurations
-const configs = {
-  local: {
-    http: {
-      port: 3000
-    },
-    domain: 'localhost',
-    max_data_size: 16777216,
-    mongo: {
-      uri: "mongodb://localhost",
-      port: "27017"
-    }
-  }
-};
+// web server configurations
+const configs = require("./configs");
 
-// used webserver configuration
+// used web server configuration
 const config = configs.local;
 
 // load required npm modules
-let   mongodb   = require( 'mongodb' );
-const http      = require( 'http' );
-const deparam   = require( 'node-jquery-deparam' );
-const moment    = require( 'moment' );
+let   mongodb     = require( 'mongodb' );
+const http        = require( 'http' );
+const deparam     = require( 'node-jquery-deparam' );
+const moment      = require( 'moment' );
+const crypto      = require( 'crypto');
+const roleParser  = require( './role_parser' );
 
 // create connection to MongoDB
 connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoDB found => Server runs without MongoDB.' );
@@ -45,7 +36,6 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
     console.log( 'Server is running. Now you can use this URLs on client-side:' );
     console.log( '- http://' + config.domain + ':' + config.http.port + ' (using HTTP protocol)' );
-
   }
 
   /**
@@ -103,12 +93,13 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
       if ( !data.get && !data.set && !data.del ) return sendForbidden();
 
       // perform database operation
-      performDatabaseOperation( data, result => {
-
-        // send result to client
-        result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
-
-      } );
+      performDatabaseOperation( data ).then(
+          result => {
+            // send result to client
+            result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
+            },
+            reason => { sendForbidden( reason ); }
+          );
 
       /**
        * sends response to client
@@ -126,13 +117,12 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
         response.end( response_data );
 
       }
-
       /** sends 'Forbidden' status code */
-      function sendForbidden() {
-        response.statusCode = 403;
-        response.end();
+      function sendForbidden( message ) {
+        message = typeof message !== 'string' ? JSON.stringify( message ) : message;
+        response.writeHead( 403, { 'content-type': 'application/json; charset=utf-8' } );
+        response.end( message );
       }
-
     }
 
   }
@@ -159,110 +149,262 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
   /**
    * performs database operation
    * @param {Object} data - received data
-   * @param {function} callback - callback (first parameter is/are result(s))
    */
-  function performDatabaseOperation( data, callback ) {
+  function performDatabaseOperation( data ) {
 
     // select kind of database
-    useMongoDB();
+    return useMongoDB();
 
     /** performs database operation in MongoDB */
     function useMongoDB() {
 
-      // get collection
-      mongodb.collection( data.store, ( err, collection ) => {
+      // check authentication
+      return new Promise( ( resolve, reject ) => {
+        getUserInfo().then(
+          userInfo => {
+            // get collection
+            mongodb.collection( data.store, ( err, collection ) => {
 
-        // determine and perform correct database operation
-        if      ( data.get ) get();                           // read
-        else if ( data.set ) set();                           // create or update
-        else if ( data.del ) del();                           // delete
+              // determine and perform correct database operation
+              if ( data.get ) {
+                // read document
+                return get( collection, data.get ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
+                    );
+              } else if ( data.set ) {
+                // create or update document
+                return set( collection, data.set ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
+                );
+              } else if ( data.del ) {
+                // delete document
+                return del( collection, data.del ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
+                );
+              }
+            } );  // end mongodb.collection()
 
-        /** reads dataset(s) and performs callback with read dataset(s) */
-        function get() {
+            /** reads dataset(s) and call resolve with read dataset(s) */
+            function get( collection, documentKey ) {
+              if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'get' ) ) {
+                return Promise.reject( 'user unauthorized' );
+              }
 
-          // perform read operation
-          getDataset( data.get, results => {
+              // perform read operation
+              return getDataset( collection, documentKey ).then( results => {
+                // call resolve on read resolve
+                return Promise.resolve( results );
+              });
+            }  // end function get()
 
-            // finish operation
-            finish( results );
+            /** creates or updates dataset and call resolve with created/updated dataset */
+            function set( collection, setData ) {
+              return new Promise( ( resolve, reject ) => {
+                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, setData.key, 'set' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
+                }
 
-          } );
+                // perform create/update operation
+                setDataset( collection, setData ).then(
+                    results => resolve(results),
+                    reason => reject(reason)
+                );
+              } );
+            }  // end function set()
 
-        }
+            /** deletes dataset and resolves Promise with deleted dataset */
+            function del( collection, documentKey ) {
+              return new Promise( ( resolve, reject ) => {
+                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'del' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
+                }
 
-        /** creates or updates dataset and perform callback with created/updated dataset */
-        function set() {
+                // read existing dataset
+                getDataset( collection, documentKey ).then( existing_dataset => {
+                  // delete dataset and call resolve with deleted dataset
+                  collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
+                } );
+              } );
+            }  // end function del()
 
-          // read existing dataset
-          getDataset( data.set.key, existing_dataset => {
+          },  // end onfulfilled handler
+
+          reason => reject( reason)   // getUserInfo() rejection handler
+
+        )  // end getUserInfo().then()
+
+      });  // end return new Promise()
+
+      /**
+       * @overview manage user information
+       * - if user doesn't exist, create a new entry with default value
+       * - if user exist, authenticate using received token
+       * @return Promise
+       *          - onfulfilled param: object containing user information
+       *          - onrejected param: rejection reason
+       */
+      function getUserInfo() {
+        return new Promise( ( resolve, reject ) => {
+          mongodb.collection( 'users', ( err, collection ) => {
+            // no user data to verify
+            if (!data.token) return;
+
+            // parse token string
+            const tokenChunks = data.token.split('#');
+            if ( tokenChunks.length !== 2 ) return;
+            const username = tokenChunks[0];
+            const token = tokenChunks[1];
+
+            // get user info
+            getDataset( collection, username ).then( results => {
+              let userInfo = results;
+              if ( !userInfo ) {
+                // create new user entry if one does not exist
+                userInfo = {
+                  'key': username,
+                  'username': username,
+                  'role': roleParser.getDefaultRole()
+                };
+
+                // create new salt-hash pair
+                createSaltHashPair( token ).then(
+                    saltHashPair => {
+                      // update userInfo
+                      Object.assign( userInfo, saltHashPair );
+
+                      // write new user info to database
+                      setDataset( collection, userInfo ).then(
+                          results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                          reason => reject( reason )
+                      );
+                    },
+                    reason => reject( reason )
+                );
+                return;
+              }
+
+              if ( !userInfo.salt || !userInfo.token ) {
+                // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
+                createSaltHashPair( token ).then(
+                    saltHashPair => {
+                      // update userInfo
+                      Object.assign( userInfo, saltHashPair );
+
+                      // write new user info to database
+                      setDataset( collection, userInfo ).then(
+                          results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                          reason => reject( reason )
+                      );
+                    },
+                    reason => reject( reason )
+                );
+                return;
+              }
+
+              // if salt hash doesn't match reject
+              crypto.scrypt( token, Buffer.from( userInfo.salt, config.key_encoding ), config.key_length,
+                ( err, derived_key ) => {
+                  if ( err ) {
+                    reject( 'unable to calculate hash from stored salt and token: ' + err.message );
+                    return;
+                  }
+                  if ( derived_key.toString( config.key_encoding ) === userInfo.token )
+                    resolve( userInfo );
+                  else
+                    reject( 'token does not match' );
+              } );
+
+              function createSaltHashPair( key ) {
+                return new Promise( ( resolve, reject ) => {
+                  const randSaltBuffer = crypto.randomBytes( config.key_length );
+                  let saltHashPair;
+                  crypto.scrypt( key, randSaltBuffer, config.key_length, ( err, derivedKey ) => {
+                    saltHashPair = { 'salt': randSaltBuffer.toString( config.key_encoding ) };
+                    if ( err ) {
+                      reject( 'failed to create user token: ' + err.message );
+                      return;
+                    }
+                    saltHashPair.token = derivedKey.toString( config.key_encoding );
+                    resolve( saltHashPair );
+                  });
+                } );
+              }  // end function createSaltHashPair()
+
+            } );  // end getDataset().then()
+
+          } );  // end mongodb.collection()
+
+        })  // end return new Promise()
+
+      }  // end function getUserInfo()
+
+      /**
+       * @overview update/create a document in collection
+       * @param collection: mongodb Collection
+       * @param setData {Object}: contains 'key' field which specify document '_id', and data to write
+       */
+      function setDataset( collection, setData ) {
+        return new Promise( ( resolve, reject ) => {
+          getDataset( collection, setData.key ).then( existing_dataset => {
 
             /**
              * priority data
              * @type {ccm.types.dataset}
              */
-            const priodata = convertDataset( data.set );
+            const prioData = convertDataset( setData );
+            // respond to send on successful update
+            const resolveData = { key: setData.key };
 
             // set 'updated_at' timestamp
-            priodata.updated_at = moment().format();
+            prioData.updated_at = moment().format();
 
-            // dataset exists? (then it's an update operation)
             if ( existing_dataset ) {
-
               /**
                * attributes that have to be unset
                * @type {Object}
                */
               const unset_data = {};
-              for ( const key in priodata )
-                if ( priodata[ key ] === '' ) {
-                  unset_data[ key ] = priodata[ key ];
-                  delete priodata[ key ];
+              for ( const key in prioData )
+                if ( prioData[ key ] === '' ) {
+                  unset_data[ key ] = prioData[ key ];
+                  delete prioData[ key ];
                 }
 
               // update dataset
-              if ( Object.keys( unset_data ).length > 0 )
-                collection.updateOne( { _id: priodata._id }, { $set: priodata, $unset: unset_data }, success );
-              else
-                collection.updateOne( { _id: priodata._id }, { $set: priodata }, success );
-
-            }
-            // create operation => add 'created_at' timestamp and perform create operation
-            else { priodata.created_at = priodata.updated_at; collection.insertOne( priodata, success ); }
-
-            /** when dataset is created/updated */
-            function success() {
-
-              // perform callback with created/updated dataset
-              getDataset( data.set.key, finish );
-
+              if ( Object.keys( unset_data ).length > 0 ) {
+                collection.updateOne( { _id: prioData._id }, { $set: prioData, $unset: unset_data },
+                    () => resolve( resolveData ) );
+              } else {
+                collection.updateOne( { _id: prioData._id }, { $set: prioData }, () => resolve( resolveData ) );
+              }
+            } else {
+              // create operation => add 'created_at' timestamp and perform create operation
+              prioData.created_at = prioData.updated_at;
+              collection.insertOne( prioData, () => resolve( resolveData ) );
             }
 
-          } );
+          } );  // end getDataset().then()
 
-        }
+        });  // end return new Promise()
 
-        /** deletes dataset and performs callback with deleted dataset */
-        function del() {
+      }  // end function setDataset()
 
-          // read existing dataset
-          getDataset( data.del, existing_dataset => {
+      /**
+       * reads dataset(s)
+       * @param collection: MongoDB collection
+       * @param {ccm.types.key|Object} key_or_query - dataset key or MongoDB query
+       */
+      function getDataset( collection, key_or_query ) {
 
-            // delete dataset and perform callback with deleted dataset
-            collection.deleteOne( { _id: convertKey( data.del ) }, () => finish( existing_dataset ) );
-
-          } );
-
-        }
-
-        /**
-         * reads dataset(s)
-         * @param {ccm.types.key|Object} key_or_query - dataset key or MongoDB query
-         * @param {function} callback - callback (first parameter is/are read dataset(s))
-         */
-        function getDataset( key_or_query, callback ) {
-
+        return new Promise( ( resolve, reject ) => {
           // read dataset(s)
-          collection.find( isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) } ).toArray( ( err, res ) => {
+          const query = isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) };
+          collection.find( query ).toArray( ( err, res ) => {
 
             // convert MongoDB dataset(s) in ccm dataset(s)
             for ( let i = 0; i < res.length; i++ )
@@ -271,86 +413,61 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
             // read dataset by key? => result is dataset or NULL
             if ( !isObject( key_or_query ) ) res = res.length ? res[ 0 ] : null;
 
-            // perform callback with reconverted result(s)
-            callback( res );
-
+            // resolve Promise reconverted result(s)
+            resolve( res );
           } );
+        } );
+      }  // end function getDataset()
 
-        }
+    }  // end function useMongoDB()
+  }  // end function performDatabaseOperation()
 
-        /**
-         * converts ccm dataset key to MongoDB dataset key
-         * @param {ccm.types.key} key - ccm dataset key
-         * @returns {string} MongoDB dataset key
-         */
-        function convertKey( key ) {
+  /**
+   * converts ccm dataset to MongoDB dataset
+   * @param {Object} ccm_dataset - ccm dataset
+   * @returns {ccm.types.dataset} MongoDB dataset
+   */
+  function convertDataset( ccm_dataset ) {
 
-          return Array.isArray( key ) ? key.join() : key;
+    const mongodb_dataset = clone( ccm_dataset );
+    mongodb_dataset._id = convertKey( mongodb_dataset.key );
+    delete mongodb_dataset.key;
+    return mongodb_dataset;
 
-        }
+  }
 
-        /**
-         * converts MongoDB key to ccm dataset key
-         * @param {string} key - MongoDB dataset key
-         * @returns {ccm.types.key} ccm dataset key
-         */
-        function reconvertKey( key ) {
+  /**
+   * reconverts MongoDB dataset to ccm dataset
+   * @param {Object} mongodb_dataset - MongoDB dataset
+   * @returns {ccm.types.dataset} ccm dataset
+   */
+  function reconvertDataset( mongodb_dataset ) {
 
-          return typeof key === 'string' && key.indexOf( ',' ) !== -1 ? key.split( ',' ) : key;
+    const ccm_dataset = clone( mongodb_dataset );
+    ccm_dataset.key = reconvertKey( ccm_dataset._id );
+    delete ccm_dataset._id;
+    return ccm_dataset;
 
-        }
+  }
 
-        /**
-         * converts ccm dataset to MongoDB dataset
-         * @param {Object} ccm_dataset - ccm dataset
-         * @returns {ccm.types.dataset} MongoDB dataset
-         */
-        function convertDataset( ccm_dataset ) {
+  /**
+   * converts ccm dataset key to MongoDB dataset key
+   * @param {ccm.types.key} key - ccm dataset key
+   * @returns {string} MongoDB dataset key
+   */
+  function convertKey( key ) {
 
-          const mongodb_dataset = clone( ccm_dataset );
-          mongodb_dataset._id = convertKey( mongodb_dataset.key );
-          delete mongodb_dataset.key;
-          return mongodb_dataset;
+    return Array.isArray( key ) ? key.join() : key;
 
-        }
+  }
 
-        /**
-         * reconverts MongoDB dataset to ccm dataset
-         * @param {Object} mongodb_dataset - MongoDB dataset
-         * @returns {ccm.types.dataset} ccm dataset
-         */
-        function reconvertDataset( mongodb_dataset ) {
-
-          const ccm_dataset = clone( mongodb_dataset );
-          ccm_dataset.key = reconvertKey( ccm_dataset._id );
-          delete ccm_dataset._id;
-          return ccm_dataset;
-
-        }
-
-        /**
-         * makes a deep copy of an object
-         * @param {Object} obj - object
-         * @returns {Object} deep copy of object
-         */
-        function clone( obj ) {
-
-          return JSON.parse( JSON.stringify( obj ) );
-
-        }
-
-      } );
-
-    }
-
-    /** finishes database operation */
-    function finish( results ) {
-
-      // perform callback with result(s)
-      callback( results );
-
-    }
-
+  /**
+   * converts MongoDB key to ccm dataset key
+   * @param {string} key - MongoDB dataset key
+   * @returns {ccm.types.key} ccm dataset key
+   */
+  function reconvertKey( key ) {
+    return typeof key === 'string' && key.indexOf( ',' ) !== -1 ? key.split( ',' ) : key;
   }
 
   /**
@@ -359,7 +476,6 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
    * @returns {boolean}
    */
   function isKey( value ) {
-
     /**
      * definition of a valid dataset key
      * @type {RegExp}
@@ -379,7 +495,6 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
     // value is not a dataset key? => not valid
     return false;
-
   }
 
   /**
@@ -388,12 +503,19 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
    * @returns {boolean}
    */
   function isObject( value ) {
-
     return typeof value === 'object' && value !== null && !Array.isArray( value );
-
   }
 
-} );
+  /**
+   * makes a deep copy of an object
+   * @param {Object} obj - object
+   * @returns {Object} deep copy of object
+   */
+  function clone( obj ) {
+    return JSON.parse( JSON.stringify( obj ) );
+  }
+
+} );  // end connectMongoDB()
 
 /**
  * creates a connection to MongoDB
@@ -403,7 +525,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 function connectMongoDB( callback, waited ) {
   if ( !mongodb || !config.mongo ) return callback();
   mongodb.MongoClient.connect( `${config.mongo.uri}:${config.mongo.port}`, { useNewUrlParser: true }, ( err, client ) => {
-    if ( !err ) { mongodb = client.db( 'ccm' ); return callback(); }
+    if ( !err ) { mongodb = client.db( 'digiklausur' ); return callback(); }
     if ( !waited ) setTimeout( () => connectMongoDB( callback, true ), 3000 );
     else { mongodb = null; callback(); }
   } );
