@@ -157,83 +157,97 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
     /** performs database operation in MongoDB */
     function useMongoDB() {
+
       // check authentication
       return new Promise( ( resolve, reject ) => {
-        getUserInfo().then( userInfo => {
-          // get collection
-          mongodb.collection( data.store, ( err, collection ) => {
+        getUserInfo().then(
+          userInfo => {
+            // get collection
+            mongodb.collection( data.store, ( err, collection ) => {
 
-          // determine and perform correct database operation
-          if ( data.get ) {
-            // read document
-            return get( collection, data.get ).then(
-                results => { resolve( results ); },
-                reason => { reject( reason ); }
+              // determine and perform correct database operation
+              if ( data.get ) {
+                // read document
+                return get( collection, data.get ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
+                    );
+              } else if ( data.set ) {
+                // create or update document
+                return set( collection, data.set ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
                 );
-          } else if ( data.set ) {
-            // create or update document
-            return set( collection, data.set ).then(
-                results => { resolve( results ); },
-                reason => { reject( reason ); }
-            );
-          } else if ( data.del ) {
-            // delete document
-            return del( collection, data.del ).then(
-                results => { resolve( results ); },
-                reason => { reject( reason ); }
-            );
-          }
-        } );
+              } else if ( data.del ) {
+                // delete document
+                return del( collection, data.del ).then(
+                    results => { resolve( results ); },
+                    reason => { reject( reason ); }
+                );
+              }
+            } );  // end mongodb.collection()
 
-        /** reads dataset(s) and call resolve with read dataset(s) */
-        function get( collection, documentKey ) {
-          if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'get' ) ) {
-            return Promise.reject( 'user unauthorized' );
-          }
+            /** reads dataset(s) and call resolve with read dataset(s) */
+            function get( collection, documentKey ) {
+              if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'get' ) ) {
+                return Promise.reject( 'user unauthorized' );
+              }
 
-          // perform read operation
-          return getDataset( collection, documentKey ).then( results => {
-            // call resolve on read resolve
-            return Promise.resolve( results );
-          });
-        }
+              // perform read operation
+              return getDataset( collection, documentKey ).then( results => {
+                // call resolve on read resolve
+                return Promise.resolve( results );
+              });
+            }  // end function get()
 
-        /** creates or updates dataset and call resolve with created/updated dataset */
-        function set( collection, setData ) {
-          return new Promise( ( resolve, reject ) => {
-            if ( !roleParser.isAllowed( userInfo.role, userInfo.username, setData.key, 'set' ) ) {
-              reject( 'user unauthorized' );
-              return;
-            }
+            /** creates or updates dataset and call resolve with created/updated dataset */
+            function set( collection, setData ) {
+              return new Promise( ( resolve, reject ) => {
+                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, setData.key, 'set' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
+                }
 
-            // perform create/update operation
-            setDataset( collection, setData ).then(
-                results => resolve(results),
-                reason => reject(reason)
-            );
-          } );
-        }
+                // perform create/update operation
+                setDataset( collection, setData ).then(
+                    results => resolve(results),
+                    reason => reject(reason)
+                );
+              } );
+            }  // end function set()
 
-        /** deletes dataset and resolves Promise with deleted dataset */
-        function del( collection, documentKey ) {
-          return new Promise( ( resolve, reject ) => {
-            if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'del' ) ) {
-              reject( 'user unauthorized' );
-              return;
-            }
+            /** deletes dataset and resolves Promise with deleted dataset */
+            function del( collection, documentKey ) {
+              return new Promise( ( resolve, reject ) => {
+                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'del' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
+                }
 
-            // read existing dataset
-            getDataset( collection, documentKey ).then( existing_dataset => {
-              // delete dataset and call resolve with deleted dataset
-              collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
-            } );
-          } );
-        }
-      } )
+                // read existing dataset
+                getDataset( collection, documentKey ).then( existing_dataset => {
+                  // delete dataset and call resolve with deleted dataset
+                  collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
+                } );
+              } );
+            }  // end function del()
 
-      });
+          },  // end onfulfilled handler
 
-      /** END OF STATEMENTS **/
+          reason => reject( reason)   // getUserInfo() rejection handler
+
+        )  // end getUserInfo().then()
+
+      });  // end return new Promise()
+
+      /**
+       * @overview manage user information
+       * - if user doesn't exist, create a new entry with default value
+       * - if user exist, authenticate using received token
+       * @return Promise
+       *          - onfulfilled param: object containing user information
+       *          - onrejected param: rejection reason
+       */
       function getUserInfo() {
         return new Promise( ( resolve, reject ) => {
           mongodb.collection( 'users', ( err, collection ) => {
@@ -250,30 +264,92 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
             getDataset( collection, username ).then( results => {
               let userInfo = results;
               if ( !userInfo ) {
+                // create new user entry if one does not exist
                 userInfo = {
                   'key': username,
                   'username': username,
                   'role': roleParser.getDefaultRole()
                 };
-                setDataset( collection, userInfo ).then(
-                    results => {
-                      getDataset( collection, results.key ).then( userData => resolve( userData ) );
+
+                // create new salt-hash pair
+                createSaltHashPair( token ).then(
+                    saltHashPair => {
+                      // update userInfo
+                      Object.assign( userInfo, saltHashPair );
+
+                      // write new user info to database
+                      setDataset( collection, userInfo ).then(
+                          results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                          reason => reject( reason )
+                      );
                     },
                     reason => reject( reason )
                 );
                 return;
               }
-              resolve(userInfo);
-              // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
-              // if salt hash doesn't match set role to undefined
-              // else get and return role TODO: interface for admin to change role
-            } );
-          } );
-        })
-      }
 
-      function setDataset(collection, setData) {
-        return new Promise( (resolve, reject) => {
+              if ( !userInfo.salt || !userInfo.token ) {
+                // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
+                createSaltHashPair( token ).then(
+                    saltHashPair => {
+                      // update userInfo
+                      Object.assign( userInfo, saltHashPair );
+
+                      // write new user info to database
+                      setDataset( collection, userInfo ).then(
+                          results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                          reason => reject( reason )
+                      );
+                    },
+                    reason => reject( reason )
+                );
+                return;
+              }
+
+              // if salt hash doesn't match reject
+              crypto.scrypt( token, Buffer.from( userInfo.salt, config.key_encoding ), config.key_length,
+                ( err, derived_key ) => {
+                  if ( err ) {
+                    reject( 'unable to calculate hash from stored salt and token: ' + err.message );
+                    return;
+                  }
+                  if ( derived_key.toString( config.key_encoding ) === userInfo.token )
+                    resolve( userInfo );
+                  else
+                    reject( 'token does not match' );
+              } );
+
+              function createSaltHashPair( key ) {
+                return new Promise( ( resolve, reject ) => {
+                  const randSaltBuffer = crypto.randomBytes( config.key_length );
+                  let saltHashPair;
+                  crypto.scrypt( key, randSaltBuffer, config.key_length, ( err, derivedKey ) => {
+                    saltHashPair = { 'salt': randSaltBuffer.toString( config.key_encoding ) };
+                    if ( err ) {
+                      reject( 'failed to create user token: ' + err.message );
+                      return;
+                    }
+                    saltHashPair.token = derivedKey.toString( config.key_encoding );
+                    resolve( saltHashPair );
+                  });
+                } );
+              }  // end function createSaltHashPair()
+
+            } );  // end getDataset().then()
+
+          } );  // end mongodb.collection()
+
+        })  // end return new Promise()
+
+      }  // end function getUserInfo()
+
+      /**
+       * @overview update/create a document in collection
+       * @param collection: mongodb Collection
+       * @param setData {Object}: contains 'key' field which specify document '_id', and data to write
+       */
+      function setDataset( collection, setData ) {
+        return new Promise( ( resolve, reject ) => {
           getDataset( collection, setData.key ).then( existing_dataset => {
 
             /**
@@ -311,20 +387,24 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
               prioData.created_at = prioData.updated_at;
               collection.insertOne( prioData, () => resolve( resolveData ) );
             }
-          } );
-        });
-      }
+
+          } );  // end getDataset().then()
+
+        });  // end return new Promise()
+
+      }  // end function setDataset()
 
       /**
        * reads dataset(s)
-       * @param collection
+       * @param collection: MongoDB collection
        * @param {ccm.types.key|Object} key_or_query - dataset key or MongoDB query
        */
       function getDataset( collection, key_or_query ) {
 
         return new Promise( ( resolve, reject ) => {
           // read dataset(s)
-          collection.find( isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) } ).toArray( ( err, res ) => {
+          const query = isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) };
+          collection.find( query ).toArray( ( err, res ) => {
 
             // convert MongoDB dataset(s) in ccm dataset(s)
             for ( let i = 0; i < res.length; i++ )
@@ -337,9 +417,10 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
             resolve( res );
           } );
         } );
-      }
-    }
-  }
+      }  // end function getDataset()
+
+    }  // end function useMongoDB()
+  }  // end function performDatabaseOperation()
 
   /**
    * converts ccm dataset to MongoDB dataset
@@ -434,7 +515,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
     return JSON.parse( JSON.stringify( obj ) );
   }
 
-} );
+} );  // end connectMongoDB()
 
 /**
  * creates a connection to MongoDB
