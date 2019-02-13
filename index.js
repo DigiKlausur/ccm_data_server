@@ -36,7 +36,6 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
     console.log( 'Server is running. Now you can use this URLs on client-side:' );
     console.log( '- http://' + config.domain + ':' + config.http.port + ' (using HTTP protocol)' );
-
   }
 
   /**
@@ -94,10 +93,13 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
       if ( !data.get && !data.set && !data.del ) return sendForbidden();
 
       // perform database operation
-      performDatabaseOperation( data ).then( result => {
-        // send result to client
-        result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
-      } );
+      performDatabaseOperation( data ).then(
+          result => {
+            // send result to client
+            result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
+            },
+            reason => { sendForbidden( reason ); }
+          );
 
       /**
        * sends response to client
@@ -116,9 +118,10 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
       }
       /** sends 'Forbidden' status code */
-      function sendForbidden() {
-        response.statusCode = 403;
-        response.end();
+      function sendForbidden( message ) {
+        message = typeof message !== 'string' ? JSON.stringify( message ) : message;
+        response.writeHead( 403, { 'content-type': 'application/json; charset=utf-8' } );
+        response.end( message );
       }
     }
 
@@ -146,7 +149,6 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
   /**
    * performs database operation
    * @param {Object} data - received data
-   * @param {function} callback - callback (first parameter is/are result(s))
    */
   function performDatabaseOperation( data ) {
 
@@ -158,21 +160,82 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
       // check authentication
       return new Promise( ( resolve, reject ) => {
         getUserInfo().then( userInfo => {
-        // get collection
-        mongodb.collection( data.store, ( err, collection ) => {
+          // get collection
+          mongodb.collection( data.store, ( err, collection ) => {
 
           // determine and perform correct database operation
-          if      ( data.get ) return get( collection, data.get ).then( results => resolve(results) );            // read
-          else if ( data.set ) return set( collection, data.set ).then( results => resolve(results) );  // create or update
-          else if ( data.del ) return del( collection, data.del ).then( results => resolve(results));   // delete
+          if ( data.get ) {
+            // read document
+            return get( collection, data.get ).then(
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
+                );
+          } else if ( data.set ) {
+            // create or update document
+            return set( collection, data.set ).then(
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
+            );
+          } else if ( data.del ) {
+            // delete document
+            return del( collection, data.del ).then(
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
+            );
+          }
         } );
+
+        /** reads dataset(s) and call resolve with read dataset(s) */
+        function get( collection, documentKey ) {
+          if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'get' ) ) {
+            return Promise.reject( 'user unauthorized' );
+          }
+
+          // perform read operation
+          return getDataset( collection, documentKey ).then( results => {
+            // call resolve on read resolve
+            return Promise.resolve( results );
+          });
+        }
+
+        /** creates or updates dataset and call resolve with created/updated dataset */
+        function set( collection, setData ) {
+          return new Promise( ( resolve, reject ) => {
+            if ( !roleParser.isAllowed( userInfo.role, userInfo.username, setData.key, 'set' ) ) {
+              reject( 'user unauthorized' );
+              return;
+            }
+
+            // perform create/update operation
+            setDataset( collection, setData ).then(
+                results => resolve(results),
+                reason => reject(reason)
+            );
+          } );
+        }
+
+        /** deletes dataset and resolves Promise with deleted dataset */
+        function del( collection, documentKey ) {
+          return new Promise( ( resolve, reject ) => {
+            if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'del' ) ) {
+              reject( 'user unauthorized' );
+              return;
+            }
+
+            // read existing dataset
+            getDataset( collection, documentKey ).then( existing_dataset => {
+              // delete dataset and call resolve with deleted dataset
+              collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
+            } );
+          } );
+        }
       } )
 
       });
 
       /** END OF STATEMENTS **/
       function getUserInfo() {
-        return new Promise( resolve => {
+        return new Promise( ( resolve, reject ) => {
           mongodb.collection( 'users', ( err, collection ) => {
             // no user data to verify
             if (!data.token) return;
@@ -189,9 +252,15 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
               if ( !userInfo ) {
                 userInfo = {
                   'key': username,
+                  'username': username,
                   'role': roleParser.getDefaultRole()
                 };
-                set( collection, userInfo ).then( results => resolve(results) );
+                setDataset( collection, userInfo ).then(
+                    results => {
+                      getDataset( collection, results.key ).then( userData => resolve( userData ) );
+                    },
+                    reason => reject( reason )
+                );
                 return;
               }
               resolve(userInfo);
@@ -203,31 +272,20 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
         })
       }
 
-      /** reads dataset(s) and call resolve with read dataset(s) */
-      function get( collection, documentKey ) {
-        // perform read operation
-        return getDataset( collection, documentKey ).then( results => {
-          // call resolve on read resolve
-          return Promise.resolve( results );
-        });
-      }
-
-      /** creates or updates dataset and call resolve with created/updated dataset */
-      function set( collection, setData ) {
-
-        return new Promise( ( resolve, reject ) => {
+      function setDataset(collection, setData) {
+        return new Promise( (resolve, reject) => {
           getDataset( collection, setData.key ).then( existing_dataset => {
 
             /**
              * priority data
              * @type {ccm.types.dataset}
              */
-            const priodata = convertDataset( setData );
+            const prioData = convertDataset( setData );
             // respond to send on successful update
             const resolveData = { key: setData.key };
 
             // set 'updated_at' timestamp
-            priodata.updated_at = moment().format();
+            prioData.updated_at = moment().format();
 
             if ( existing_dataset ) {
               /**
@@ -235,37 +293,26 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                * @type {Object}
                */
               const unset_data = {};
-              for ( const key in priodata )
-                if ( priodata[ key ] === '' ) {
-                  unset_data[ key ] = priodata[ key ];
-                  delete priodata[ key ];
+              for ( const key in prioData )
+                if ( prioData[ key ] === '' ) {
+                  unset_data[ key ] = prioData[ key ];
+                  delete prioData[ key ];
                 }
 
               // update dataset
               if ( Object.keys( unset_data ).length > 0 ) {
-                collection.updateOne( { _id: priodata._id }, { $set: priodata, $unset: unset_data },
-                                      () => resolve( resolveData ) );
+                collection.updateOne( { _id: prioData._id }, { $set: prioData, $unset: unset_data },
+                    () => resolve( resolveData ) );
               } else {
-                collection.updateOne( { _id: priodata._id }, { $set: priodata }, () => resolve( resolveData ) );
+                collection.updateOne( { _id: prioData._id }, { $set: prioData }, () => resolve( resolveData ) );
               }
             } else {
               // create operation => add 'created_at' timestamp and perform create operation
-              priodata.created_at = priodata.updated_at;
-              collection.insertOne( priodata, () => resolve( resolveData ) );
+              prioData.created_at = prioData.updated_at;
+              collection.insertOne( prioData, () => resolve( resolveData ) );
             }
           } );
-        } );
-      }
-
-      /** deletes dataset and resolves Promise with deleted dataset */
-      function del( collection, documentKey ) {
-        return new Promise( ( resolve, reject ) => {
-          // read existing dataset
-          getDataset( collection, documentKey ).then( existing_dataset => {
-            // delete dataset and call resolve with deleted dataset
-            collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
-          } );
-        } );
+        });
       }
 
       /**

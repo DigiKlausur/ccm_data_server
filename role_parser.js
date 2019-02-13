@@ -32,7 +32,7 @@ module.exports = {
       const permissions = roles[ roleName ].permissions;
       for ( let i = 0; i < permissions.length; i++ ) {
           // keyword %all%: operation allowed for all collections
-          if ( permissions[i].id === '%all%' && isOpAllowed( permissions[id].operations, operation ) )
+          if ( permissions[i].id === '%all%' && isOpAllowed( permissions[i].operations, operation ) )
               return true;
 
           // keyword %user%: collection name must match username TODO: can extend to regex match here
@@ -41,7 +41,7 @@ module.exports = {
               return true;
 
           // collection name match
-          if ( permissions[i].id === collectionName && isOpAllowed( permissions[id].operations, operation ) )
+          if ( permissions[i].id === collectionName && isOpAllowed( permissions[i].operations, operation ) )
               return true;
       }
 
