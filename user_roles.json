@@ -45,5 +45,7 @@
         "operations": [ "get", "set" ]
       }
     ]
-  }
+  },
+
+  "default": "student"
 }

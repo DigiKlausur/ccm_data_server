@@ -94,11 +94,9 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
       if ( !data.get && !data.set && !data.del ) return sendForbidden();
 
       // perform database operation
-      performDatabaseOperation( data, result => {
-
+      performDatabaseOperation( data ).then( result => {
         // send result to client
         result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
-
       } );
 
       /**
@@ -117,13 +115,11 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
         response.end( response_data );
 
       }
-
       /** sends 'Forbidden' status code */
       function sendForbidden() {
         response.statusCode = 403;
         response.end();
       }
-
     }
 
   }
@@ -152,111 +148,123 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
    * @param {Object} data - received data
    * @param {function} callback - callback (first parameter is/are result(s))
    */
-  function performDatabaseOperation( data, callback ) {
+  function performDatabaseOperation( data ) {
 
     // select kind of database
-    useMongoDB();
+    return useMongoDB();
 
     /** performs database operation in MongoDB */
     function useMongoDB() {
       // check authentication
-      let userInfo;
-      mongodb.collection( 'users', ( err, collection ) => {
-        // no user data to verify
-        if (!data.token) return;
+      return new Promise( ( resolve, reject ) => {
+        getUserInfo().then( userInfo => {
+        // get collection
+        mongodb.collection( data.store, ( err, collection ) => {
 
-        // parse token string
-        const tokenChunks = data.token.split('#');
-        if ( tokenChunks.length !== 2 ) return;
-        const username = tokenChunks[0];
-        const token = tokenChunks[1];
-
-        getDataset( collection, username, results => {
-          if ( !results ) {
-            // if no collection create new
-          }
-          // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
-          // if salt hash doesn't match set role to undefined
-          // else get and return role TODO: interface for admin to change role
+          // determine and perform correct database operation
+          if      ( data.get ) return get( collection, data.get ).then( results => resolve(results) );            // read
+          else if ( data.set ) return set( collection, data.set ).then( results => resolve(results) );  // create or update
+          else if ( data.del ) return del( collection, data.del ).then( results => resolve(results));   // delete
         } );
-      } );
+      } )
 
-      // get collection
-      mongodb.collection( data.store, ( err, collection ) => {
-
-        // determine and perform correct database operation
-        if      ( data.get ) get(collection);                           // read
-        else if ( data.set ) set(collection);                           // create or update
-        else if ( data.del ) del(collection);                           // delete
-
-      } );
+      });
 
       /** END OF STATEMENTS **/
+      function getUserInfo() {
+        return new Promise( resolve => {
+          mongodb.collection( 'users', ( err, collection ) => {
+            // no user data to verify
+            if (!data.token) return;
 
-      /** reads dataset(s) and performs callback with read dataset(s) */
-      function get(collection) {
-        // perform read operation
-        getDataset( collection, data.get, results => {
-          // finish operation
-          finish( results );
-        } );
+            // parse token string
+            const tokenChunks = data.token.split('#');
+            if ( tokenChunks.length !== 2 ) return;
+            const username = tokenChunks[0];
+            const token = tokenChunks[1];
+
+            // get user info
+            getDataset( collection, username ).then( results => {
+              let userInfo = results;
+              if ( !userInfo ) {
+                userInfo = {
+                  'key': username,
+                  'role': roleParser.getDefaultRole()
+                };
+                set( collection, userInfo ).then( results => resolve(results) );
+                return;
+              }
+              resolve(userInfo);
+              // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
+              // if salt hash doesn't match set role to undefined
+              // else get and return role TODO: interface for admin to change role
+            } );
+          } );
+        })
       }
 
-      /** creates or updates dataset and perform callback with created/updated dataset */
-      function set( collection ) {
+      /** reads dataset(s) and call resolve with read dataset(s) */
+      function get( collection, documentKey ) {
+        // perform read operation
+        return getDataset( collection, documentKey ).then( results => {
+          // call resolve on read resolve
+          return Promise.resolve( results );
+        });
+      }
 
-        // read existing dataset
-        getDataset( collection, data.set.key, existing_dataset => {
+      /** creates or updates dataset and call resolve with created/updated dataset */
+      function set( collection, setData ) {
 
-          /**
-           * priority data
-           * @type {ccm.types.dataset}
-           */
-          const priodata = convertDataset( data.set );
-
-          // set 'updated_at' timestamp
-          priodata.updated_at = moment().format();
-
-          // dataset exists? (then it's an update operation)
-          if ( existing_dataset ) {
+        return new Promise( ( resolve, reject ) => {
+          getDataset( collection, setData.key ).then( existing_dataset => {
 
             /**
-             * attributes that have to be unset
-             * @type {Object}
+             * priority data
+             * @type {ccm.types.dataset}
              */
-            const unset_data = {};
-            for ( const key in priodata )
-              if ( priodata[ key ] === '' ) {
-                unset_data[ key ] = priodata[ key ];
-                delete priodata[ key ];
+            const priodata = convertDataset( setData );
+            // respond to send on successful update
+            const resolveData = { key: setData.key };
+
+            // set 'updated_at' timestamp
+            priodata.updated_at = moment().format();
+
+            if ( existing_dataset ) {
+              /**
+               * attributes that have to be unset
+               * @type {Object}
+               */
+              const unset_data = {};
+              for ( const key in priodata )
+                if ( priodata[ key ] === '' ) {
+                  unset_data[ key ] = priodata[ key ];
+                  delete priodata[ key ];
+                }
+
+              // update dataset
+              if ( Object.keys( unset_data ).length > 0 ) {
+                collection.updateOne( { _id: priodata._id }, { $set: priodata, $unset: unset_data },
+                                      () => resolve( resolveData ) );
+              } else {
+                collection.updateOne( { _id: priodata._id }, { $set: priodata }, () => resolve( resolveData ) );
               }
-
-            // update dataset
-            if ( Object.keys( unset_data ).length > 0 )
-              collection.updateOne( { _id: priodata._id }, { $set: priodata, $unset: unset_data }, success );
-            else
-              collection.updateOne( { _id: priodata._id }, { $set: priodata }, success );
-
-          }
-          // create operation => add 'created_at' timestamp and perform create operation
-          else { priodata.created_at = priodata.updated_at; collection.insertOne( priodata, success ); }
-
-          /** when dataset is created/updated */
-          function success() {
-
-            // perform callback with created/updated dataset
-            getDataset( collection, data.set.key, finish );
-
-          }
+            } else {
+              // create operation => add 'created_at' timestamp and perform create operation
+              priodata.created_at = priodata.updated_at;
+              collection.insertOne( priodata, () => resolve( resolveData ) );
+            }
+          } );
         } );
       }
 
-      /** deletes dataset and performs callback with deleted dataset */
-      function del( collection ) {
-        // read existing dataset
-        getDataset( collection, data.del, existing_dataset => {
-          // delete dataset and perform callback with deleted dataset
-          collection.deleteOne( { _id: convertKey( data.del ) }, () => finish( existing_dataset ) );
+      /** deletes dataset and resolves Promise with deleted dataset */
+      function del( collection, documentKey ) {
+        return new Promise( ( resolve, reject ) => {
+          // read existing dataset
+          getDataset( collection, documentKey ).then( existing_dataset => {
+            // delete dataset and call resolve with deleted dataset
+            collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
+          } );
         } );
       }
 
@@ -264,34 +272,26 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
        * reads dataset(s)
        * @param collection
        * @param {ccm.types.key|Object} key_or_query - dataset key or MongoDB query
-       * @param {function} callback - callback (first parameter is/are read dataset(s))
        */
-      function getDataset( collection, key_or_query, callback ) {
+      function getDataset( collection, key_or_query ) {
 
-        // read dataset(s)
-        collection.find( isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) } ).toArray( ( err, res ) => {
+        return new Promise( ( resolve, reject ) => {
+          // read dataset(s)
+          collection.find( isObject( key_or_query ) ? key_or_query : { _id: convertKey( key_or_query ) } ).toArray( ( err, res ) => {
 
-          // convert MongoDB dataset(s) in ccm dataset(s)
-          for ( let i = 0; i < res.length; i++ )
-            res[ i ] = reconvertDataset( res[ i ] );
+            // convert MongoDB dataset(s) in ccm dataset(s)
+            for ( let i = 0; i < res.length; i++ )
+              res[ i ] = reconvertDataset( res[ i ] );
 
-          // read dataset by key? => result is dataset or NULL
-          if ( !isObject( key_or_query ) ) res = res.length ? res[ 0 ] : null;
+            // read dataset by key? => result is dataset or NULL
+            if ( !isObject( key_or_query ) ) res = res.length ? res[ 0 ] : null;
 
-          // perform callback with reconverted result(s)
-          callback( res );
-
+            // resolve Promise reconverted result(s)
+            resolve( res );
+          } );
         } );
-
       }
     }
-
-    /** finishes database operation */
-    function finish( results ) {
-      // perform callback with result(s)
-      callback( results );
-    }
-
   }
 
   /**
@@ -397,7 +397,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 function connectMongoDB( callback, waited ) {
   if ( !mongodb || !config.mongo ) return callback();
   mongodb.MongoClient.connect( `${config.mongo.uri}:${config.mongo.port}`, { useNewUrlParser: true }, ( err, client ) => {
-    if ( !err ) { mongodb = client.db( 'ccm' ); return callback(); }
+    if ( !err ) { mongodb = client.db( 'digiklausur' ); return callback(); }
     if ( !waited ) setTimeout( () => connectMongoDB( callback, true ), 3000 );
     else { mongodb = null; callback(); }
   } );

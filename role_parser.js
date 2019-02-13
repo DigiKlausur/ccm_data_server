@@ -54,6 +54,10 @@ module.exports = {
           permissions[operation] = this.isAllowed(roleName, userName, collectionName, operation);
       } );
       return permissions;
+  },
+
+  getDefaultRole: function () {
+      return roles.default;
   }
 };
 
