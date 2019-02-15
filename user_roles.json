@@ -1,51 +1,44 @@
 {
-  "admin": {
-    "id": "admin",
-    "name": "Admin",
-    "description": "",
-    "permissions": [
-      {
-        "id": "%all%",
-        "operations": [ "get", "set", "del" ]
-      }
-    ]
+  "roles": {
+    "admin": {
+      "name": "Administrator",
+      "description": ""
+    },
+
+    "grader": {
+       "name": "Grader",
+      "description": ""
+    },
+
+    "student": {
+      "name": "Student",
+      "description": ""
+    }
   },
 
-  "grader": {
-    "id": "grader",
-    "name": "Grader",
-    "description": "",
-    "permissions": [
-      {
-        "id": "%all%",
-        "operations": [ "get" ]
+  "permissions": {
+    "collection_default": {
+
+      "document_default": {
+        "%all%": [ "get" ],
+        "%user%": [ "get", "set" ]
       },
-      {
-        "id": "questions",
-        "operations": [ "get", "set" ]
+
+      "admin": {
+        "%all%": [ "get", "set", "del" ]
       },
-      {
-        "id": "%user%",
-        "operations": [ "get", "set", "del" ]
+
+      "grader": {
+        "%all%": [ "get", "set" ]
       }
-    ]
+    },
+
+    "users": {
+      "document_default": {}
+    }
   },
 
-  "student": {
-    "id": "student",
-    "name": "Student",
-    "description": "",
-    "permissions": [
-      {
-        "id": "questions",
-        "operations": [ "get" ]
-      },
-      {
-        "id": "%user%",
-        "operations": [ "get", "set" ]
-      }
-    ]
-  },
+  "default_role": "student",
 
-  "default": "student"
+  "allowed_operations": [ "get", "set", "del" ]
 }
