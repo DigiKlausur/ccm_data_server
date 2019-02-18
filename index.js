@@ -13,7 +13,8 @@ const config = configs.local;
 
 // load required npm modules
 let   mongodb     = require( 'mongodb' );
-const http        = require( 'http' );
+const fs          = require( 'fs'  );
+const https       = require( 'https' );
 const deparam     = require( 'node-jquery-deparam' );
 const moment      = require( 'moment' );
 const crypto      = require( 'crypto');
@@ -29,13 +30,18 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
   function startWebserver() {
 
     // create HTTP webserver
-    const http_server = http.createServer( handleRequest );
+    const credentials = {
+      key:  fs.readFileSync( config.privateKey ),
+      cert: fs.readFileSync( config.certificate ),
+      ca:   fs.readFileSync( config.ca )
+    };
+    const https_server = https.createServer( credentials, handleRequest );
 
-    // start HTTP webserver
-    http_server.listen( config.http.port );
+    // start HTTPS webserver
+    https_server.listen( config.https.port );
 
     console.log( 'Server is running. Now you can use this URLs on client-side:' );
-    console.log( '- http://' + config.domain + ':' + config.http.port + ' (using HTTP protocol)' );
+    console.log( '- https://' + config.domain + ':' + config.https.port + ' (using HTTPS protocol)' );
   }
 
   /**
