@@ -174,69 +174,71 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
               // determine and perform correct database operation
               if ( data.get ) {
                 // read document
-                return get( collection, data.get ).then(
+                return get().then(
                     results => { resolve( results ); },
                     reason => { reject( reason ); }
                     );
               } else if ( data.set ) {
                 // create or update document
-                return set( collection, data.set ).then(
+                return set().then(
                     results => { resolve( results ); },
                     reason => { reject( reason ); }
                 );
               } else if ( data.del ) {
                 // delete document
-                return del( collection, data.del ).then(
+                return del().then(
                     results => { resolve( results ); },
                     reason => { reject( reason ); }
                 );
               }
-            } );  // end mongodb.collection()
 
-            /** reads dataset(s) and call resolve with read dataset(s) */
-            function get( collection, documentKey ) {
-              if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'get' ) ) {
-                return Promise.reject( 'user unauthorized' );
-              }
-
-              // perform read operation
-              return getDataset( collection, documentKey ).then( results => {
-                // call resolve on read resolve
-                return Promise.resolve( results );
-              });
-            }  // end function get()
-
-            /** creates or updates dataset and call resolve with created/updated dataset */
-            function set( collection, setData ) {
-              return new Promise( ( resolve, reject ) => {
-                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, setData.key, 'set' ) ) {
-                  reject( 'user unauthorized' );
-                  return;
+              /** reads dataset(s) and call resolve with read dataset(s) */
+              function get() {
+                if ( !roleParser.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.get, 'get' ) ) {
+                  return Promise.reject( 'user unauthorized' );
                 }
 
-                // perform create/update operation
-                setDataset( collection, setData ).then(
-                    results => resolve(results),
-                    reason => reject(reason)
-                );
-              } );
-            }  // end function set()
+                // perform read operation
+                return getDataset( collection, data.get ).then( results => {
+                  // call resolve on read resolve
+                  return Promise.resolve( results );
+                });
+              }  // end function get()
 
-            /** deletes dataset and resolves Promise with deleted dataset */
-            function del( collection, documentKey ) {
-              return new Promise( ( resolve, reject ) => {
-                if ( !roleParser.isAllowed( userInfo.role, userInfo.username, documentKey, 'del' ) ) {
-                  reject( 'user unauthorized' );
-                  return;
-                }
+              /** creates or updates dataset and call resolve with created/updated dataset */
+              function set() {
+                return new Promise( ( resolve, reject ) => {
+                  if ( !roleParser.isDocOpAllowed(
+                            userInfo.role, userInfo.username, data.store, data.set.key, 'set' ) ) {
+                    reject( 'user unauthorized' );
+                    return;
+                  }
 
-                // read existing dataset
-                getDataset( collection, documentKey ).then( existing_dataset => {
-                  // delete dataset and call resolve with deleted dataset
-                  collection.deleteOne( { _id: convertKey( documentKey ) }, () => resolve( existing_dataset ) );
+                  // perform create/update operation
+                  setDataset( collection, data.set ).then(
+                      results => resolve(results),
+                      reason => reject(reason)
+                  );
                 } );
-              } );
-            }  // end function del()
+              }  // end function set()
+
+              /** deletes dataset and resolves Promise with deleted dataset */
+              function del() {
+                return new Promise( ( resolve, reject ) => {
+                  if ( !roleParser.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.del, 'del' ) ) {
+                    reject( 'user unauthorized' );
+                    return;
+                  }
+
+                  // read existing dataset
+                  getDataset( collection, data.del ).then( existing_dataset => {
+                    // delete dataset and call resolve with deleted dataset
+                    collection.deleteOne( { _id: convertKey( data.del ) }, () => resolve( existing_dataset ) );
+                  } );
+                } );
+              }  // end function del()
+
+            } );  // end mongodb.collection()
 
           },  // end onfulfilled handler
 

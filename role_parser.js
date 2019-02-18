@@ -5,14 +5,17 @@
  */
 
 // get configured user roles
-const roles = require("./user_roles");
+const roleConfigs = require( "./user_roles" );
 
 // only support CCM database operations for now
-const allowedOperations = [ 'get', 'set', 'del' ];
+const allowedOperations = roleConfigs.allowed_operations;
+const roles = roleConfigs.roles;
+const permissions = roleConfigs.permissions;
 
 module.exports = {
-  isAllowed: function( roleName, username, collectionName, operation ) {
+  isDocOpAllowed: function( roleName, username, collectionName, docName, operation ) {
       /**
+       * @overview document level permission
        * supported keywords:
        *    %all%: permission apply for all collections
        *    %user%: permission apply only for the specific user's collection
@@ -23,41 +26,44 @@ module.exports = {
        * @param collectionName: name of collection to access
        * @param operation: operation to be performed on the the DB collection
        */
+      const colPermissions = permissions[ collectionName ] ?
+          permissions[ collectionName ] : permissions[ "collection_default" ];
+
       // roleName not recognized
       if ( !roles[ roleName ] ) return false;
 
+      // read default permissions and overwrite with user specific permissions
+      const defaultDocPermissions = colPermissions[ "document_default" ];
+      const docPermissions = Object.assign( defaultDocPermissions,
+          colPermissions[ roleName ] ? colPermissions[ roleName ] : {} );
+
       // operation not recognized
-      if ( !isOpAllowed(allowedOperations, operation) ) return false;
+      if ( !isOpAllowed( allowedOperations, operation) ) return false;
 
-      const permissions = roles[ roleName ].permissions;
-      for ( let i = 0; i < permissions.length; i++ ) {
-          // keyword %all%: operation allowed for all collections
-          if ( permissions[i].id === '%all%' && isOpAllowed( permissions[i].operations, operation ) )
-              return true;
+      // keyword %all%: operation allowed for all collections
+      if ( docPermissions[ "%all%" ] && isOpAllowed( docPermissions[ "%all%" ], operation ) ) return true;
 
-          // keyword %user%: collection name must match username TODO: can extend to regex match here
-          if ( permissions[i].id === '%user%' && collectionName === username &&
-               isOpAllowed( permissions[id].operations, operation ) )
-              return true;
+      // keyword %user%: collection name must match username TODO: can extend to regex match here
+      if ( docPermissions[ "%user%" ] && docName === username && isOpAllowed( docPermissions[ "%user%" ], operation ) )
+          return true;
 
-          // collection name match
-          if ( permissions[i].id === collectionName && isOpAllowed( permissions[i].operations, operation ) )
-              return true;
-      }
+      // document name match
+      if ( docPermissions[docName] && isOpAllowed( docPermissions[docName], operation ) )
+          return true;
 
       return false;
   },
 
-  getPermissions: function( roleName, userName, collectionName ) {
+  getPermissions: function( roleName, userName, collectionName, docName ) {
       let permissions = {};
       allowedOperations.forEach( operation => {
-          permissions[operation] = this.isAllowed(roleName, userName, collectionName, operation);
+          permissions[operation] = this.isDocOpAllowed(roleName, userName, collectionName, docName, operation);
       } );
       return permissions;
   },
 
   getDefaultRole: function () {
-      return roles.default;
+      return roleConfigs.default_role;
   }
 };
 
