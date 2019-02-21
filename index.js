@@ -254,7 +254,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
         return new Promise( ( resolve, reject ) => {
           mongodb.collection( 'users', ( err, collection ) => {
             // no user data to verify
-            if (!data.token) return;
+            if ( !data.token ) return;
 
             // parse token string
             const tokenChunks = data.token.split('#');
@@ -262,25 +262,13 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
             const username = tokenChunks[0];
             const token = tokenChunks[1];
 
-            // get user info
-            getDataset( collection, username ).then( results => {
-              let userInfo = results;
-              if ( !userInfo ) {
-                // create new user entry if one does not exist
-                userInfo = {
-                  'key': username,
-                  'username': username,
-                  'role': roleParser.getDefaultRole()
-                };
-
-                // create new salt-hash pair
-                createSaltHashPair( token ).then(
-                    saltHashPair => {
-                      // update userInfo
-                      Object.assign( userInfo, saltHashPair );
-
+            collection.countDocuments( {}, { limit: 2 }, ( err, count ) => {
+              // if no user, create first one as admin
+              if ( count === 0 ) {
+                createNewUser( username, 'admin', token ).then (
+                    newUserInfo => {
                       // write new user info to database
-                      setDataset( collection, userInfo ).then(
+                      setDataset( collection, newUserInfo ).then(
                           results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
                           reason => reject( reason )
                       );
@@ -290,54 +278,57 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                 return;
               }
 
-              if ( !userInfo.salt || !userInfo.token ) {
-                // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
-                createSaltHashPair( token ).then(
-                    saltHashPair => {
-                      // update userInfo
-                      Object.assign( userInfo, saltHashPair );
+              // get user info
+              getDataset( collection, username ).then( results => {
+                let userInfo = results;
+                if ( !userInfo ) {
+                  createNewUser( username, roleParser.getDefaultRole(), token ).then (
+                      newUserInfo => {
+                        // write new user info to database
+                        setDataset( collection, newUserInfo ).then(
+                            results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                            reason => reject( reason )
+                        );
+                      },
+                      reason => reject( reason )
+                  );
+                  return;
+                }
 
-                      // write new user info to database
-                      setDataset( collection, userInfo ).then(
-                          results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
-                          reason => reject( reason )
-                      );
-                    },
-                    reason => reject( reason )
-                );
-                return;
-              }
+                if ( !userInfo.salt || !userInfo.token ) {
+                  // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
+                  createSaltHashPair( token ).then(
+                      saltHashPair => {
+                        // update userInfo
+                        Object.assign( userInfo, saltHashPair );
 
-              // if salt hash doesn't match reject
-              crypto.scrypt( token, Buffer.from( userInfo.salt, config.key_encoding ), config.key_length,
-                ( err, derived_key ) => {
-                  if ( err ) {
-                    reject( 'unable to calculate hash from stored salt and token: ' + err.message );
-                    return;
-                  }
-                  if ( derived_key.toString( config.key_encoding ) === userInfo.token )
-                    resolve( userInfo );
-                  else
-                    reject( 'token does not match' );
-              } );
+                        // write new user info to database
+                        setDataset( collection, userInfo ).then(
+                            results => getDataset( collection, results.key ).then( userData => resolve( userData ) ),
+                            reason => reject( reason )
+                        );
+                      },
+                      reason => reject( reason )
+                  );
+                  return;
+                }
 
-              function createSaltHashPair( key ) {
-                return new Promise( ( resolve, reject ) => {
-                  const randSaltBuffer = crypto.randomBytes( config.key_length );
-                  let saltHashPair;
-                  crypto.scrypt( key, randSaltBuffer, config.key_length, ( err, derivedKey ) => {
-                    saltHashPair = { 'salt': randSaltBuffer.toString( config.key_encoding ) };
-                    if ( err ) {
-                      reject( 'failed to create user token: ' + err.message );
-                      return;
-                    }
-                    saltHashPair.token = derivedKey.toString( config.key_encoding );
-                    resolve( saltHashPair );
-                  });
-                } );
-              }  // end function createSaltHashPair()
+                // if salt hash doesn't match reject
+                crypto.scrypt( token, Buffer.from( userInfo.salt, config.key_encoding ), config.key_length,
+                    ( err, derived_key ) => {
+                      if ( err ) {
+                        reject( 'unable to calculate hash from stored salt and token: ' + err.message );
+                        return;
+                      }
+                      if ( derived_key.toString( config.key_encoding ) === userInfo.token )
+                        resolve( userInfo );
+                      else
+                        reject( 'token does not match' );
+                    } );
 
-            } );  // end getDataset().then()
+              } );  // end getDataset().then()
+
+            } );  // end collection.count()
 
           } );  // end mongodb.collection()
 
@@ -421,8 +412,51 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
         } );
       }  // end function getDataset()
 
+      /**
+       * @overview create new user info document to write to database
+       */
+      function createNewUser( username, role, token ) {
+        // create new user entry if one does not exist
+        let userInfo = {
+          'key': username,
+          'username': username,
+          'role': role
+        };
+
+        return new Promise( ( resolve, reject ) => {
+          // create new salt-hash pair
+          createSaltHashPair( token ).then(
+              saltHashPair => {
+                // update userInfo
+                Object.assign( userInfo, saltHashPair );
+                resolve( userInfo );
+              },
+              reason => reject( reason )
+          );
+        } );
+      }  // end function createNewUser()
+
     }  // end function useMongoDB()
   }  // end function performDatabaseOperation()
+
+  /**
+   * @overview create a new random token and password pair based on the given secret key
+   */
+  function createSaltHashPair( key ) {
+    return new Promise( ( resolve, reject ) => {
+      const randSaltBuffer = crypto.randomBytes( config.key_length );
+      let saltHashPair;
+      crypto.scrypt( key, randSaltBuffer, config.key_length, ( err, derivedKey ) => {
+        saltHashPair = { 'salt': randSaltBuffer.toString( config.key_encoding ) };
+        if ( err ) {
+          reject( 'failed to create user token: ' + err.message );
+          return;
+        }
+        saltHashPair.token = derivedKey.toString( config.key_encoding );
+        resolve( saltHashPair );
+      });
+    } );
+  }  // end function createSaltHashPair()
 
   /**
    * converts ccm dataset to MongoDB dataset
