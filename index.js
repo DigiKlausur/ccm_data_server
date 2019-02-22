@@ -14,6 +14,7 @@ const config = configs.local;
 // load required npm modules
 let   mongodb     = require( 'mongodb' );
 const fs          = require( 'fs'  );
+const http        = require( 'http' );
 const https       = require( 'https' );
 const deparam     = require( 'node-jquery-deparam' );
 const moment      = require( 'moment' );
@@ -29,19 +30,30 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
   /** starts a HTTP webserver with websocket support */
   function startWebserver() {
 
-    // create HTTP webserver
-    const credentials = {
-      key:  fs.readFileSync( config.privateKey ),
-      cert: fs.readFileSync( config.certificate ),
-      ca:   fs.readFileSync( config.ca )
-    };
-    const https_server = https.createServer( credentials, handleRequest );
+    if ( config.https ) {
+      const credentials = {
+        key:  fs.readFileSync( config.privateKey ),
+        cert: fs.readFileSync( config.certificate ),
+        ca:   fs.readFileSync( config.ca )
+      };
+      const https_server = https.createServer( credentials, handleRequest );
 
-    // start HTTPS webserver
-    https_server.listen( config.https.port );
+      // start HTTPS webserver
+      https_server.listen( config.https.port );
 
-    console.log( 'Server is running. Now you can use this URLs on client-side:' );
-    console.log( '- https://' + config.domain + ':' + config.https.port + ' (using HTTPS protocol)' );
+      console.log( 'HTTPS server started at: https://' + config.domain + ':' + config.https.port );
+
+    } else if ( config.http ) {
+      const http_server = http.createServer( handleRequest );
+
+      // start HTTP webserver
+      http_server.listen( config.http.port );
+
+      console.log( 'HTTP server started at: http://' + config.domain + ':' + config.http.port);
+
+    } else {
+      console.error( "neither 'http' or 'https' configuration specified" );
+    }
   }
 
   /**

@@ -3,8 +3,20 @@
   {
     "http":
     {
-      "port": 80
+      "port": 3000
     },
+    "domain": "127.0.0.1",
+    "max_data_size": 16777216,
+    "mongo": {
+      "uri": "mongodb://localhost",
+      "port": "27017"
+    },
+    "key_length": 64,
+    "key_encoding": "base64"
+  },
+
+  "digiklausur":
+  {
     "https":
     {
       "port": 443
