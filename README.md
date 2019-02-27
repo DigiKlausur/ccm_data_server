@@ -38,7 +38,7 @@ the random string as its content
 ```
 # ln -s `pwd`/ccm_data_server.service /lib/systemd/system/
 ```
-* Allow node to bind to SSL port 443 (reqires `apt` package)
+* Allow node to bind to SSL port 443 (requires `apt` package `libcap2-bin`)
 ```
 # setcap cap_net_bind_service=+ep `readlink -f \`which node\``
 ```
