@@ -1,0 +1,22 @@
+[Unit]
+Description=index.js - Handle database requests for DigiKlausur
+Documentation=https://github.com/DigiKlausur/ccm_data_server
+After=network.target
+
+[Service]
+Type=simple
+User=nodejs
+ExecStart=/usr/bin/node /path/to/ccm_data_server/index.js
+Restart=on-failure
+# Restart service after 10 seconds if node service crashes
+RestartSec=10
+WorkingDirectory=/path/to/ccm_data_server
+# Output to syslog
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=ccm_data_server
+Environment=NODE_ENV=production PORT=443
+
+[Install]
+WantedBy=multi-user.target
+
