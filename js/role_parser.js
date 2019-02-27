@@ -5,7 +5,7 @@
  */
 
 // get configured user roles
-const roleConfigs = require( "./user_roles" );
+const roleConfigs = require( "../config/user_roles" );
 
 // only support CCM database operations for now
 const allowedOperations = roleConfigs.allowed_operations;

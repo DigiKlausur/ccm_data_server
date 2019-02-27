@@ -6,10 +6,10 @@
  */
 
 // web server configurations
-const configs = require("./configs");
+const configs = require( "./config/configs" );
 
 // used web server configuration
-const config = configs.local;
+const config = configs.digiklausur;
 
 // load required npm modules
 let   mongodb     = require( 'mongodb' );
@@ -19,7 +19,7 @@ const https       = require( 'https' );
 const deparam     = require( 'node-jquery-deparam' );
 const moment      = require( 'moment' );
 const crypto      = require( 'crypto');
-const roleParser  = require( './role_parser' );
+const roleParser  = require( './js/role_parser' );
 
 // create connection to MongoDB
 connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoDB found => Server runs without MongoDB.' );
