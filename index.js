@@ -230,7 +230,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                     return;
                   }
 
-                  handleSpecialGet( data.set ).then( setData => {
+                  handleSpecialSet( data.set ).then( setData => {
                     // perform create/update operation
                     setDataset( collection, setData ).then(
                       results => resolve( results ),
@@ -238,28 +238,38 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                     );
                   } );
 
-                  // handle special GET requests, propagate 'setData' as promise result or change it as needed
-                  function handleSpecialGet( setData ) {
+                  // handle special SET requests, propagate 'setData' as promise result or change it as needed
+                  function handleSpecialSet( setData ) {
                     return new Promise ( ( resolve, reject ) => {
-                      if ( 'answers' in setData ) {
+                      if ( setData.key === userInfo.username ) {
                         // update documents containing answers for each question with the new data
-                        for ( questionId in setData[ 'answers' ] ) {
+                        if ( !setData[ 'answers' ] ) setData[ 'answers' ] = {};
+                        for ( const questionId in setData[ 'answers' ] ) {
                           const ansText = setData[ 'answers' ][ questionId ][ 'text' ];
                           const ansHash = setData[ 'answers' ][ questionId ][ 'hash' ];
                           const ansDocName = 'answers_' + questionId;
                           getDataset( collection, ansDocName ).then( answerData => {
                             // create a document for answers if doesn't exist
-                            if ( answerData === null ) answerData = { 'key': ansDocName };
+                            if ( answerData === null ) answerData = { 'key': ansDocName, 'entries': {} };
 
-                            // if an entry for this answer already exist, do nothing
-                            if ( ansHash in answerData ) return;
+                            // if an entry for this answer does not exist, create one
+                            if ( !( ansHash in answerData[ 'entries' ] ) ) {
+                              answerData[ 'entries' ][ ansHash ] = { 'text': ansText, 'ranked_by': {} };
+                            }
 
-                            // if this is a new answer, create a new entry and update the document
-                            answerData[ ansHash ] = { 'text': ansText, 'rank_count': 0 };
+                            // update ranking info
+                            if ( 'ranking' in setData && setData[ 'ranking' ][ questionId ] ) {
+                              for ( rankedAnsHash in setData[ 'ranking' ][ questionId ] ) {
+                                if ( !( rankedAnsHash in answerData[ 'entries' ] ) ) continue;
+                                answerData[ 'entries' ][ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] = true;
+                              }
+                            }
+
                             setDataset( collection, answerData );
-                          });
+                          } ).catch( reason => console.log( reason ) );
                         }
-                      }
+                      }  // end if setData.key === username
+
                       resolve( setData );
                     } );
                   }

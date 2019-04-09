@@ -48,3 +48,46 @@ the random string as its content
 # systemctl enable ccm_data_server.service
 # systemctl start ccm_data_server.service
 ```
+
+## User access to collection and documents
+Specified in [`user_roles.json`](./config/user_roles.json). Currently 3 roles are supported:
+* `admin`
+* `grader`
+* `student`
+TODO(minhnh) need further description of the roles
+
+## Database structure
+A sample layout of the database is available in the `resources/question_answers_data.js` on the
+[`digklausur/ccm_components`](https://github.com/DigiKlausur/ccm_components) repository.
+
+### `users` collection
+Contain user information e.g. user role. No external access by any user roles is possible for this collection
+at the moment. In the future, an admin account may get to modify the role for each user.
+
+### Default collection
+Currently designed to store question and answer data for a lecture. Supported documents within this collection are
+`questions`, `answers`, and a personal document for each user.
+
+#### `questions`
+Contain questions created by `grader` and/or `admin`, which are stored in the `entries` field. Each question in
+`entries` should be identified by an unique key (e.g. hash of the question text).
+```json
+{
+    _id: 'questions',
+    entries: {
+        <hash of question text>: {
+            text: <question text>,
+            last_modified: <last user to write to the question>
+        }
+    }
+}
+```
+
+`grader` and `admin` has read/write access to this document, and `student` only has `read` access.
+
+#### `answer_<question_id>`
+Contain answers for each question (identified by the `question_id`), as well as the users who ranked the answers.
+
+#### User document
+This document is named/identified by the user's username and contains answer for each question by the user. `student`
+is allowed write access to this document.
