@@ -210,6 +210,10 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                   return Promise.reject( 'user unauthorized' );
                 }
 
+                if ( data.get === 'role' ) {
+                  return Promise.resolve( { name: userInfo.role } );
+                }
+
                 // perform read operation
                 return getDataset( collection, data.get ).then( results => {
                   // call resolve on read resolve
@@ -226,11 +230,49 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                     return;
                   }
 
-                  // perform create/update operation
-                  setDataset( collection, data.set ).then(
-                      results => resolve(results),
-                      reason => reject(reason)
-                  );
+                  handleSpecialSet( data.set ).then( setData => {
+                    // perform create/update operation
+                    setDataset( collection, setData ).then(
+                      results => resolve( results ),
+                      reason => reject( reason )
+                    );
+                  } );
+
+                  // handle special SET requests, propagate 'setData' as promise result or change it as needed
+                  function handleSpecialSet( setData ) {
+                    return new Promise ( ( resolve, reject ) => {
+                      if ( setData.key === userInfo.username ) {
+                        // update documents containing answers for each question with the new data
+                        if ( !setData[ 'answers' ] ) setData[ 'answers' ] = {};
+                        for ( const questionId in setData[ 'answers' ] ) {
+                          const ansText = setData[ 'answers' ][ questionId ][ 'text' ];
+                          const ansHash = setData[ 'answers' ][ questionId ][ 'hash' ];
+                          const ansDocName = 'answers_' + questionId;
+                          getDataset( collection, ansDocName ).then( answerData => {
+                            // create a document for answers if doesn't exist
+                            if ( answerData === null ) answerData = { 'key': ansDocName, 'entries': {} };
+
+                            // if an entry for this answer does not exist, create one
+                            if ( !( ansHash in answerData[ 'entries' ] ) ) {
+                              answerData[ 'entries' ][ ansHash ] = { 'text': ansText, 'ranked_by': {} };
+                            }
+
+                            // update ranking info
+                            if ( 'ranking' in setData && setData[ 'ranking' ][ questionId ] ) {
+                              for ( rankedAnsHash in setData[ 'ranking' ][ questionId ] ) {
+                                if ( !( rankedAnsHash in answerData[ 'entries' ] ) ) continue;
+                                answerData[ 'entries' ][ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] = true;
+                              }
+                            }
+
+                            setDataset( collection, answerData );
+                          } ).catch( reason => console.log( reason ) );
+                        }
+                      }  // end if setData.key === username
+
+                      resolve( setData );
+                    } );
+                  }
                 } );
               }  // end function set()
 
