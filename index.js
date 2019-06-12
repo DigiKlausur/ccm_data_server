@@ -276,9 +276,13 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
 
                             // update ranking info
                             if ( 'ranking' in setData && setData[ 'ranking' ][ questionId ] ) {
-                              for ( rankedAnsHash in setData[ 'ranking' ][ questionId ] ) {
-                                if ( !( rankedAnsHash in answerData[ 'entries' ] ) ) continue;
-                                answerData[ 'entries' ][ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] = true;
+                              const userRankings = setData[ 'ranking' ][ questionId ];
+                              for ( rankedAnsHash in userRankings ) {
+                                if ( !( rankedAnsHash in answerData.entries ) ) continue;
+                                const maxRanking = Math.max( ...Object.values( userRankings ) );
+                                // normalize the ranking to deal with different number of ranked answers
+                                answerData.entries[ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] =
+                                    userRankings[ ansId ] / maxRanking;
                               }
                             }
 
