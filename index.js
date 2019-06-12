@@ -263,12 +263,14 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                             // delete the answer if it has no author
                             Object.keys( answerData.entries ).forEach( ansKey => {
                               if ( ansKey === ansHash ) return;
-                              if ( userInfo.username in answerData.entries[ ansKey ][ 'authors' ] ) {
+                              if ( answerData.entries[ ansKey  ][ 'authors'  ]
+                                   && userInfo.username in answerData.entries[ ansKey ][ 'authors' ] ) {
                                 console.log( `removing user '${ userInfo.username }' ` +
                                              `from the author dict of answer '${ ansKey }'` );
                                 delete answerData.entries[ ansKey ][ 'authors' ][ userInfo.username ];
                               }
-                              if ( Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
+                              if ( !answerData.entries[ ansKey  ][ 'authors'  ]
+                                   || Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
                                 console.log( `removing answer '${ ansKey }' for question '${ questionId }'` );
                                 delete answerData.entries[ ansKey ];
                               }
