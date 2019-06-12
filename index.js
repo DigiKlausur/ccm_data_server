@@ -284,7 +284,7 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                                 const maxRanking = Math.max( ...Object.values( userRankings ) );
                                 // normalize the ranking to deal with different number of ranked answers
                                 answerData.entries[ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] =
-                                    userRankings[ ansId ] / maxRanking;
+                                    userRankings[ rankedAnsHash ] / maxRanking;
                               }
                             }
 
