@@ -253,9 +253,26 @@ connectMongoDB( () => { if ( !mongodb || !config.mongo ) console.log( 'No MongoD
                             if ( answerData === null ) answerData = { 'key': ansDocName, 'entries': {} };
 
                             // if an entry for this answer does not exist, create one
-                            if ( !( ansHash in answerData[ 'entries' ] ) ) {
-                              answerData[ 'entries' ][ ansHash ] = { 'text': ansText, 'ranked_by': {} };
+                            if ( !( ansHash in answerData.entries ) ) {
+                              answerData.entries[ ansHash ] = { 'text': ansText, 'authors': {}, 'ranked_by': {} };
                             }
+
+                            // add user to the 'authors' dict of the current answer for the current question
+                            answerData.entries[ ansHash ][ 'authors' ][ userInfo.username ] = true;
+                            // remove user from 'authors' dict of other answers for the current question,
+                            // delete the answer if it has no author
+                            Object.keys( answerData.entries ).forEach( ansKey => {
+                              if ( ansKey === ansHash ) return;
+                              if ( userInfo.username in answerData.entries[ ansKey ][ 'authors' ] ) {
+                                console.log( `removing user '${ userInfo.username }' ` +
+                                             `from the author dict of answer '${ ansKey }'` );
+                                delete answerData.entries[ ansKey ][ 'authors' ][ userInfo.username ];
+                              }
+                              if ( Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
+                                console.log( `removing answer '${ ansKey }' for question '${ questionId }'` );
+                                delete answerData.entries[ ansKey ];
+                              }
+                            } );
 
                             // update ranking info
                             if ( 'ranking' in setData && setData[ 'ranking' ][ questionId ] ) {
