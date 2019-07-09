@@ -6,20 +6,21 @@
  */
 
 // web server configurations
-const configs = require( "./config/configs" );
+const configs   = require( "./config/configs" );
 const curProtocol = 'http';
 
 // load required npm modules
-let   mongodb     = require( 'mongodb' );
-const fs          = require( 'fs'  );
-const http        = require( 'http' );
-const https       = require( 'https' );
-const deparam     = require( 'node-jquery-deparam' );
+let   mongodb   = require( 'mongodb' );
+const fs        = require( 'fs'  );
+const http      = require( 'http' );
+const https     = require( 'https' );
+const deparam   = require( 'node-jquery-deparam' );
 
 // load library modules
-const helpers     = require( './js/helpers' );
-const userOps     = require( './js/user_operations' );
-const mongoOps    = require( './js/mongodb_operations' );
+const helpers   = require( './js/helpers' );
+const userOps   = require( './js/user_operations' );
+const mongoOps  = require( './js/mongodb_operations' );
+const qaOps     = require( './js/qa_operations' );
 
 // create connection to MongoDB
 connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No MongoDB found => Server runs without MongoDB.' );
@@ -170,162 +171,107 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
    */
   function performDatabaseOperation( data ) {
 
-    // select kind of database
-    return useMongoDB();
+    // check authentication
+    return new Promise( ( resolve, reject ) => {
+      userOps.getUserInfo( mongodb, data.token ).then(
+        userInfo => {
+          // get collection
+          mongodb.collection( data.store, ( err, collection ) => {
 
-    /** performs database operation in MongoDB */
-    function useMongoDB() {
+            // determine and perform correct database operation
+            if ( data.get ) {
+              // read document
+              return get().then(
+                  results => { resolve( results ); },
+                  reason => { reject( reason ); }
+                  );
+            } else if ( data.set ) {
+              // create or update document
+              return set().then(
+                  results => { resolve( results ); },
+                  reason => { reject( reason ); }
+              );
+            } else if ( data.del ) {
+              // delete document
+              return del().then(
+                  results => { resolve( results ); },
+                  reason => { reject( reason ); }
+              );
+            }
 
-      // check authentication
-      return new Promise( ( resolve, reject ) => {
-        userOps.getUserInfo( mongodb, data.token ).then(
-          userInfo => {
-            // get collection
-            mongodb.collection( data.store, ( err, collection ) => {
-
-              // determine and perform correct database operation
-              if ( data.get ) {
-                // read document
-                return get().then(
-                    results => { resolve( results ); },
-                    reason => { reject( reason ); }
-                    );
-              } else if ( data.set ) {
-                // create or update document
-                return set().then(
-                    results => { resolve( results ); },
-                    reason => { reject( reason ); }
-                );
-              } else if ( data.del ) {
-                // delete document
-                return del().then(
-                    results => { resolve( results ); },
-                    reason => { reject( reason ); }
-                );
+            /** reads dataset(s) and call resolve with read dataset(s) */
+            function get() {
+              if ( !userOps.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.get, 'get' ) ) {
+                return Promise.reject( 'user unauthorized' );
               }
 
-              /** reads dataset(s) and call resolve with read dataset(s) */
-              function get() {
-                if ( !userOps.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.get, 'get' ) ) {
-                  return Promise.reject( 'user unauthorized' );
+              if ( data.get === 'role' ) {
+                return Promise.resolve( { name: userInfo.role } );
+              }
+
+              // perform read operation
+              return mongoOps.getDataset( collection, data.get ).then( results => {
+                // call resolve on read resolve
+                return Promise.resolve( results );
+              });
+            }  // end function get()
+
+            /** creates or updates dataset and call resolve with created/updated dataset */
+            function set() {
+              return new Promise( ( resolve, reject ) => {
+                if ( !userOps.isDocOpAllowed(
+                          userInfo.role, userInfo.username, data.store, data.set.key, 'set' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
                 }
 
-                if ( data.get === 'role' ) {
-                  return Promise.resolve( { name: userInfo.role } );
+                handleSpecialSet( data.set ).then( setData => {
+                  // perform create/update operation
+                  mongoOps.setDataset( collection, setData ).then(
+                    results => resolve( results ),
+                    reason => reject( reason )
+                  );
+                } );
+
+                // handle special SET requests, propagate 'setData' as promise result or change it as needed
+                function handleSpecialSet( setData ) {
+                  return new Promise ( ( resolve, reject ) => {
+                    if ( setData.key === userInfo.username ) {
+                      qaOps.updateAnswerDoc( collection, userInfo.username, setData );
+                    }  // end if setData.key === username
+
+                    resolve( setData );
+                  } );
+                }
+              } );
+            }  // end function set()
+
+            /** deletes dataset and resolves Promise with deleted dataset */
+            function del() {
+              return new Promise( ( resolve, reject ) => {
+                if ( !userOps.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.del, 'del' ) ) {
+                  reject( 'user unauthorized' );
+                  return;
                 }
 
-                // perform read operation
-                return mongoOps.getDataset( collection, data.get ).then( results => {
-                  // call resolve on read resolve
-                  return Promise.resolve( results );
-                });
-              }  // end function get()
-
-              /** creates or updates dataset and call resolve with created/updated dataset */
-              function set() {
-                return new Promise( ( resolve, reject ) => {
-                  if ( !userOps.isDocOpAllowed(
-                            userInfo.role, userInfo.username, data.store, data.set.key, 'set' ) ) {
-                    reject( 'user unauthorized' );
-                    return;
-                  }
-
-                  handleSpecialSet( data.set ).then( setData => {
-                    // perform create/update operation
-                    mongoOps.setDataset( collection, setData ).then(
-                      results => resolve( results ),
-                      reason => reject( reason )
-                    );
-                  } );
-
-                  // handle special SET requests, propagate 'setData' as promise result or change it as needed
-                  function handleSpecialSet( setData ) {
-                    return new Promise ( ( resolve, reject ) => {
-                      if ( setData.key === userInfo.username ) {
-                        // update documents containing answers for each question with the new data
-                        if ( !setData[ 'answers' ] ) setData[ 'answers' ] = {};
-                        for ( const questionId in setData[ 'answers' ] ) {
-                          const ansText = setData[ 'answers' ][ questionId ][ 'text' ];
-                          const ansHash = setData[ 'answers' ][ questionId ][ 'hash' ];
-                          const ansDocName = 'answers_' + questionId;
-                          mongoOps.getDataset( collection, ansDocName ).then( answerData => {
-                            // create a document for answers if doesn't exist
-                            if ( answerData === null ) answerData = { 'key': ansDocName, 'entries': {} };
-
-                            // if an entry for this answer does not exist, create one
-                            if ( !( ansHash in answerData.entries ) ) {
-                              answerData.entries[ ansHash ] = { 'text': ansText, 'authors': {}, 'ranked_by': {} };
-                            }
-
-                            // add user to the 'authors' dict of the current answer for the current question
-                            answerData.entries[ ansHash ][ 'authors' ][ userInfo.username ] = true;
-                            // remove user from 'authors' dict of other answers for the current question,
-                            // delete the answer if it has no author
-                            Object.keys( answerData.entries ).forEach( ansKey => {
-                              if ( ansKey === ansHash ) return;
-                              if ( answerData.entries[ ansKey  ][ 'authors'  ]
-                                   && userInfo.username in answerData.entries[ ansKey ][ 'authors' ] ) {
-                                console.log( `removing user '${ userInfo.username }' ` +
-                                             `from the author dict of answer '${ ansKey }'` );
-                                delete answerData.entries[ ansKey ][ 'authors' ][ userInfo.username ];
-                              }
-                              if ( !answerData.entries[ ansKey  ][ 'authors'  ]
-                                   || Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
-                                console.log( `removing answer '${ ansKey }' for question '${ questionId }'` );
-                                delete answerData.entries[ ansKey ];
-                              }
-                            } );
-
-                            // update ranking info
-                            if ( 'ranking' in setData && setData[ 'ranking' ][ questionId ] ) {
-                              const userRankings = setData[ 'ranking' ][ questionId ];
-                              for ( rankedAnsHash in userRankings ) {
-                                if ( !( rankedAnsHash in answerData.entries ) ) continue;
-                                const maxRanking = Math.max( ...Object.values( userRankings ) );
-                                // normalize the ranking to deal with different number of ranked answers
-                                answerData.entries[ rankedAnsHash ][ 'ranked_by' ][ userInfo.username ] =
-                                    userRankings[ rankedAnsHash ] / maxRanking;
-                              }
-                            }
-
-                            mongoOps.setDataset( collection, answerData );
-                          } ).catch( reason => console.log( reason ) );
-                        }
-                      }  // end if setData.key === username
-
-                      resolve( setData );
-                    } );
-                  }
+                // read existing dataset
+                mongoOps.getDataset( collection, data.del ).then( existing_dataset => {
+                  // delete dataset and call resolve with deleted dataset
+                  collection.deleteOne( { _id: helpers.convertKey( data.del ) }, () => resolve( existing_dataset ) );
                 } );
-              }  // end function set()
+              } );
+            }  // end function del()
 
-              /** deletes dataset and resolves Promise with deleted dataset */
-              function del() {
-                return new Promise( ( resolve, reject ) => {
-                  if ( !userOps.isDocOpAllowed( userInfo.role, userInfo.username, data.store, data.del, 'del' ) ) {
-                    reject( 'user unauthorized' );
-                    return;
-                  }
+          } );  // end mongodb.collection()
 
-                  // read existing dataset
-                  mongoOps.getDataset( collection, data.del ).then( existing_dataset => {
-                    // delete dataset and call resolve with deleted dataset
-                    collection.deleteOne( { _id: helpers.convertKey( data.del ) }, () => resolve( existing_dataset ) );
-                  } );
-                } );
-              }  // end function del()
+        },  // end onfulfilled handler
 
-            } );  // end mongodb.collection()
+        reason => reject( reason)   // getUserInfo() rejection handler
 
-          },  // end onfulfilled handler
+      )  // end getUserInfo().then()
 
-          reason => reject( reason)   // getUserInfo() rejection handler
+    });  // end return new Promise()
 
-        )  // end getUserInfo().then()
-
-      });  // end return new Promise()
-
-    }  // end function useMongoDB()
   }  // end function performDatabaseOperation()
 
 } );  // end connectMongoDB()
