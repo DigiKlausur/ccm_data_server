@@ -1,36 +1,29 @@
 {
-  "local":
-  {
-    "http":
-    {
+  "domain": "127.0.0.1",
+
+  "max_data_size": 16777216,
+
+  "protocol": {
+    "http": {
       "port": 3000
     },
-    "domain": "127.0.0.1",
-    "max_data_size": 16777216,
-    "mongo": {
-      "uri": "mongodb://localhost",
-      "port": "27017"
-    },
+
+    "https":
+    {
+      "port": 443,
+      "privateKey": "/path/to/privkey.pem",
+      "certificate": "/path/to/cert.pem",
+      "ca": "/path/to/chain.pem"
+    }
+  },
+
+  "encryption": {
     "key_length": 64,
     "key_encoding": "base64"
   },
 
-  "digiklausur":
-  {
-    "https":
-    {
-      "port": 443
-    },
-    "domain": "127.0.0.1",
-    "max_data_size": 16777216,
-    "mongo": {
-      "uri": "mongodb://localhost",
-      "port": "27017"
-    },
-    "key_length": 64,
-    "key_encoding": "base64",
-    "privateKey": "/path/to/privkey.pem",
-    "certificate": "/path/to/cert.pem",
-    "ca": "/path/to/chain.pem"
+  "mongo": {
+    "uri": "mongodb://localhost",
+    "port": "27017"
   }
 }
