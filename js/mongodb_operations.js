@@ -3,7 +3,6 @@
  * @author Minh Nguyen <minh.nguyen@smail.inf.h-brs.de> 2019
  * @license MIT License
  */
-
 module.exports = {
   getDataset: _getDataset,
   setDataset: _setDataset
