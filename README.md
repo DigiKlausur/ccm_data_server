@@ -70,15 +70,24 @@ Currently designed to store question and answer data for a lecture. Supported do
 
 #### `questions`
 Contain questions created by `grader` and/or `admin`, which are stored in the `entries` field. Each question in
-`entries` should be identified by an unique key (e.g. hash of the question text).
+`entries` should be identified by an unique key (e.g. hash of the question text). Deadlines for answering questions
+and ranking answers are stored in `answer_deadline` and `ranking_deadline` fields, respectively.
 ```json
 {
-    _id: 'questions',
-    entries: {
-        <hash of question text>: {
-            text: <question text>,
-            last_modified: <last user to write to the question>
+    "_id": "questions",
+    "entries": {
+        "<hash of question text>": {
+            "text": "<question text>",
+            "last_modified": "<last user to write to the question>"
         }
+    },
+    "answer_deadline" : {
+        "date" : "YYYY-MM-DD",
+        "time" : "hh:mm"
+    },
+    "ranking_deadline" : {
+        "date" : "YYYY-MM-DD",
+        "time" : "hh:mm"
     }
 }
 ```
@@ -86,8 +95,39 @@ Contain questions created by `grader` and/or `admin`, which are stored in the `e
 `grader` and `admin` has read/write access to this document, and `student` only has `read` access.
 
 #### `answer_<question_id>`
-Contain answers for each question (identified by the `question_id`), as well as the users who ranked the answers.
+Contain answers for each question (identified by the `question_id`), the answers' authors as well as the users who
+ranked the answers.
+```json
+{
+    "_id" : "answers_<hash of question text>",
+    "entries" : {
+        "<hash of answer text>" : {
+            "text" : "<answer text>",
+            "authors" : {
+                "<username>" : true
+            },
+            "ranked_by" : { "<another username>": "<normalized ranking value>" }
+        }
+    }
+}
+```
 
 #### User document
-This document is named/identified by the user's username and contains answer for each question by the user. `student`
-is allowed write access to this document.
+This document is named/identified by the user's username and contains answer for each question by the user. Users with
+role `student` are allowed write access to this document.
+
+```json
+{
+    "_id" : "<username>",
+    "answers" : {
+        "<hash of question text>" : {
+            "text" : "<answer text>",
+            "hash" : "<hash of answer text>"
+    },
+    "ranking" : {
+        "<hash of question text>": {
+            "<hash of answer text>": "<ranking index, e.g. 0-5>"
+        }
+    },
+}
+```
