@@ -33,7 +33,7 @@
       }
     },
 
-    "roles": {
+    "courses": {
       "document_default": {},
 
       "admin": {
