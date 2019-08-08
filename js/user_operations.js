@@ -90,36 +90,35 @@ function _isOpAllowed( operations, requestedOp ) {
 }
 
 /** @overview get user role for a specific Course ID */
-async function _getUserRole( mongoInstance, userInfo, courseId ) {
+async function _getUserRoleInCourse( mongoInstance, userInfo, courseId ) {
   return new Promise( ( resolve, reject  ) => {
-    mongoInstance.collection( 'roles', ( err, roleCollection ) => {
+    mongoInstance.collection( 'courses', ( err, courseCollection ) => {
       if ( err ) {
         reject( err );
         return;
       }
 
       // check if role info for course exist, if not create empty document
-      const courseRoleDoc = roleCollection && roleCollection[ courseId ]
-                          ? roleCollection[ courseId ] : { 'key': courseId };
+      const courseRoleDoc = courseCollection && courseCollection[ courseId ]
+                          ? courseCollection[ courseId ] : { 'key': courseId, 'roles': {} };
 
-      if ( courseRoleDoc[ userInfo.username ] ) {
+      if ( courseRoleDoc.roles[ userInfo.username ] ) {
         // user exist in course role document => resolve and return
-        userInfo.role = courseRoleDoc[ userInfo.username ];
+        userInfo.role = courseRoleDoc.roles[ userInfo.username ];
         resolve( userInfo );
         return;
       }
 
       // user not already in role collection for this class => create new entry
       const userRole = userInfo[ 'is_admin' ] ? 'admin' : _getDefaultRole();
-      courseRoleDoc[ userInfo.username ] = userRole;
+      courseRoleDoc.roles[ userInfo.username ] = userRole;
       userInfo.role = userRole;
 
       // update role collection with new user
-      console.log(userInfo);
-      mongoOps.setDataset( roleCollection, courseRoleDoc ).then( () => resolve( userInfo ) );
+      mongoOps.setDataset( courseCollection, courseRoleDoc ).then( () => resolve( userInfo ) );
     } );
   } );
-}  // end _getUserRole()
+}  // end _getUserRoleInCourse()
 
 /**
  * @overview create new user info document to write to database
@@ -188,7 +187,7 @@ function _getUserInfo( mongoInstance, tokenString, courseId ) {
         // if no user, create first one as admin
         if ( count === 0 ) {
           _createNewUser( userCollection, username, true, token )
-          .then( userInfo => _getUserRole( mongoInstance, userInfo, courseId ) )
+          .then( userInfo => _getUserRoleInCourse( mongoInstance, userInfo, courseId ) )
           .then( userInfo => resolve( userInfo ) );
           return;
         }
@@ -206,7 +205,7 @@ function _getUserInfo( mongoInstance, tokenString, courseId ) {
         )
 
         // get user's role for the course
-        .then( userInfo => _getUserRole( mongoInstance, userInfo, courseId ) )
+        .then( userInfo => _getUserRoleInCourse( mongoInstance, userInfo, courseId ) )
 
         // handle user token
         .then(
