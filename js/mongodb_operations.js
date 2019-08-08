@@ -83,7 +83,12 @@ function _setDataset( collection, setData ) {
         collection.insertOne( prioData, () => resolve( resolveData ) );
       }
 
-    } );  // end mongoOps.getDataset().then()
+    } )
+    .catch( exception => {
+      console.log( '[_setDataset] _getDataset() throws an exception:' );
+      console.log( exception );
+      reject( 'unhandled exception' );
+    } );  // end _getDataset()
 
   });  // end return new Promise()
 

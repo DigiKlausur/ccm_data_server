@@ -33,6 +33,14 @@
       }
     },
 
+    "roles": {
+      "document_default": {},
+
+      "admin": {
+        "%all%": [ "get", "set" ]
+      }
+    },
+
     "users": {
       "document_default": {}
     }

@@ -23,7 +23,8 @@ const mongoOps  = require( './js/mongodb_operations' );
 const qaOps     = require( './js/qa_operations' );
 
 // create connection to MongoDB
-connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No MongoDB found => Server runs without MongoDB.' );
+connectMongoDB( () => {
+  if ( !mongodb || !configs.mongo ) console.log( 'No MongoDB found => Server runs without MongoDB.' );
 
   // start webserver
   startWebserver();
@@ -113,12 +114,12 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
 
       // perform database operation
       performDatabaseOperation( data ).then(
-          result => {
-            // send result to client
-            result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
-            },
-            reason => { sendForbidden( reason ); }
-          );
+        result => {
+          // send result to client
+          result === undefined ? sendForbidden() : send( data.get ? result : ( data.set ? result.key : true ) );
+          },
+          reason => { sendForbidden( reason ); }
+        );
 
       /**
        * sends response to client
@@ -136,6 +137,7 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
         response.end( response_data );
 
       }
+
       /** sends 'Forbidden' status code */
       function sendForbidden( message ) {
         message = typeof message !== 'string' ? JSON.stringify( message ) : message;
@@ -173,7 +175,17 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
 
     // check authentication
     return new Promise( ( resolve, reject ) => {
-      userOps.getUserInfo( mongodb, data.token ).then(
+      // parse store string of format '<store_name>#<course_id>'
+      const chunks = data.store.split( '#' );
+      if ( chunks.length != 2 ) {
+        reject( 'store string format is invalid or does not contain course ID' );
+        return;
+      }
+      data.store = chunks[0];
+      const courseId = chunks[1];
+
+      // get user information
+      userOps.getUserInfo( mongodb, data.token, courseId ).then(
         userInfo => {
           // get collection
           mongodb.collection( data.store, ( err, collection ) => {
@@ -182,20 +194,20 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
             if ( data.get ) {
               // read document
               return get().then(
-                  results => { resolve( results ); },
-                  reason => { reject( reason ); }
-                  );
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
+                );
             } else if ( data.set ) {
               // create or update document
               return set().then(
-                  results => { resolve( results ); },
-                  reason => { reject( reason ); }
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
               );
             } else if ( data.del ) {
               // delete document
               return del().then(
-                  results => { resolve( results ); },
-                  reason => { reject( reason ); }
+                results => { resolve( results ); },
+                reason => { reject( reason ); }
               );
             }
 
@@ -266,7 +278,7 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
 
         },  // end onfulfilled handler
 
-        reason => reject( reason)   // getUserInfo() rejection handler
+        reason => reject( reason )   // getUserInfo() rejection handler
 
       )  // end getUserInfo().then()
 
@@ -283,9 +295,11 @@ connectMongoDB( () => { if ( !mongodb || !configs.mongo ) console.log( 'No Mongo
  */
 function connectMongoDB( callback, waited ) {
   if ( !mongodb || !configs.mongo ) return callback();
-  mongodb.MongoClient.connect( `${configs.mongo.uri}:${configs.mongo.port}`, { useNewUrlParser: true }, ( err, client ) => {
-    if ( !err ) { mongodb = client.db( 'digiklausur' ); return callback(); }
-    if ( !waited ) setTimeout( () => connectMongoDB( callback, true ), 3000 );
-    else { mongodb = null; callback(); }
-  } );
+  mongodb.MongoClient.connect(
+    `${configs.mongo.uri}:${configs.mongo.port}`, { useNewUrlParser: true },
+    ( err, client ) => {
+      if ( !err ) { mongodb = client.db( 'digiklausur' ); return callback(); }
+      if ( !waited ) setTimeout( () => connectMongoDB( callback, true ), 3000 );
+      else { mongodb = null; callback(); }
+    } );
 }

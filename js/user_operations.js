@@ -89,27 +89,62 @@ function _isOpAllowed( operations, requestedOp ) {
   return false;
 }
 
+/** @overview get user role for a specific Course ID */
+async function _getUserRole( mongoInstance, userInfo, courseId ) {
+  return new Promise( ( resolve, reject  ) => {
+    mongoInstance.collection( 'roles', ( err, roleCollection ) => {
+      if ( err ) {
+        reject( err );
+        return;
+      }
+
+      // check if role info for course exist, if not create empty document
+      const courseRoleDoc = roleCollection && roleCollection[ courseId ]
+                          ? roleCollection[ courseId ] : { 'key': courseId };
+
+      if ( courseRoleDoc[ userInfo.username ] ) {
+        // user exist in course role document => resolve and return
+        userInfo.role = courseRoleDoc[ userInfo.username ];
+        resolve( userInfo );
+        return;
+      }
+
+      // user not already in role collection for this class => create new entry
+      const userRole = userInfo[ 'is_admin' ] ? 'admin' : _getDefaultRole();
+      courseRoleDoc[ userInfo.username ] = userRole;
+      userInfo.role = userRole;
+
+      // update role collection with new user
+      console.log(userInfo);
+      mongoOps.setDataset( roleCollection, courseRoleDoc ).then( () => resolve( userInfo ) );
+    } );
+  } );
+}  // end _getUserRole()
+
 /**
  * @overview create new user info document to write to database
  */
-function _createNewUser( username, role, token ) {
+async function _createNewUser( userCollection, username, isAdmin, token ) {
   // create new user entry if one does not exist
   let userInfo = {
     'key': username,
     'username': username,
-    'role': role
+    'is_admin': isAdmin
   };
 
-  return new Promise( ( resolve, reject ) => {
-    // create new salt-hash pair
-    helpers.createSaltHashPair( token ).then( saltHashPair => {
-        // update userInfo
-        Object.assign( userInfo, saltHashPair );
-        resolve( userInfo );
-      },
-      reason => reject( reason )
-    );
-  } );
+  return helpers.createSaltHashPair( token )
+  .then(
+    saltHashPair => {
+      Object.assign( userInfo, saltHashPair );
+      return userInfo;
+    }
+  )
+  .then(
+    async userInfo => {
+      // write new user info to user database, and return it as Promise resolution
+      return mongoOps.setDataset( userCollection, userInfo ).then( () => { return userInfo; } );
+    }
+  );
 }  // end function _createNewUser()
 
 /**
@@ -120,88 +155,88 @@ function _createNewUser( username, role, token ) {
  *          - onfulfilled param: object containing user information
  *          - onrejected param: rejection reason
  */
-function _getUserInfo( mongoInstance, tokenString ) {
+function _getUserInfo( mongoInstance, tokenString, courseId ) {
+
   return new Promise( ( resolve, reject ) => {
-    mongoInstance.collection( 'users', ( err, collection ) => {
+
+    // no user data to verify
+    if ( !tokenString ) {
+      console.log( 'no user token supplied' );
+      reject( 'invalid user token in request' );
+      return;
+    }
+
+    // parse token string of format '<username>#<token>'
+    const tokenChunks = tokenString.split('#');
+    if ( tokenChunks.length !== 2 ) {
+      console.log( 'user token has invalid format' );
+      reject( 'invalid user token in request' );
+      return;
+    }
+    const username = tokenChunks[0];
+    const token = tokenChunks[1];
+
+    // read users document
+    mongoInstance.collection( 'users', ( err, userCollection ) => {
       if ( err ) {
         console.log( "querying for 'users' collection failed" );
         reject( 'server error' );
         return;
       }
 
-      // no user data to verify
-      if ( !tokenString ) {
-        console.log( 'no user token supplied' );
-        reject( 'invalid user info for request' );
-        return;
-      }
-
-      // parse token string of format '<username>#<token>'
-      const tokenChunks = tokenString.split('#');
-      if ( tokenChunks.length !== 2 ) return;
-      const username = tokenChunks[0];
-      const token = tokenChunks[1];
-
-      collection.countDocuments( {}, { limit: 2 }, ( err, count ) => {
+      userCollection.countDocuments( {}, { limit: 2 }, ( err, count ) => {
         // if no user, create first one as admin
         if ( count === 0 ) {
-          _createNewUser( username, 'admin', token ).then (
-              newUserInfo => {
-                // write new user info to database
-                mongoOps.setDataset( collection, newUserInfo ).then(
-                    results => mongoOps.getDataset( collection, results.key ).then( userData => resolve( userData ) ),
-                    reason => reject( reason )
-                );
-              },
-              reason => reject( reason )
-          );
+          _createNewUser( userCollection, username, true, token )
+          .then( userInfo => _getUserRole( mongoInstance, userInfo, courseId ) )
+          .then( userInfo => resolve( userInfo ) );
           return;
         }
 
         // get user info
-        mongoOps.getDataset( collection, username ).then( results => {
-          let userInfo = results;
-          if ( !userInfo ) {
-            _createNewUser( username, userOps.getDefaultRole(), token ).then (
-                newUserInfo => {
-                  // write new user info to database
-                  mongoOps.setDataset( collection, newUserInfo ).then(
-                      results => mongoOps.getDataset( collection, results.key ).then( userData => resolve( userData ) ),
-                      reason => reject( reason )
-                  );
-                },
-                reason => reject( reason )
-            );
-            return;
+        mongoOps.getDataset( userCollection, username )
+        .then(
+          userInfo => {
+            if ( !userInfo ) {
+              // create a non-admin user
+              return _createNewUser( userCollection, username, false, token );
+            }
+            return userInfo;
           }
+        )
 
-          if ( !userInfo.salt || !userInfo.token ) {
+        // get user's role for the course
+        .then( userInfo => _getUserRole( mongoInstance, userInfo, courseId ) )
+
+        // handle user token
+        .then(
+          async userInfo => {
             // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
-            helpers.createSaltHashPair( token ).then(
-                saltHashPair => {
+            if ( !userInfo.salt || !userInfo.token ) {
+              return helpers.createSaltHashPair( token )
+              .then(
+                async saltHashPair => {
                   // update userInfo
                   Object.assign( userInfo, saltHashPair );
 
                   // write new user info to database
-                  mongoOps.setDataset( collection, userInfo ).then(
-                      results => mongoOps.getDataset( collection, results.key ).then( userData => resolve( userData ) ),
-                      reason => reject( reason )
-                  );
+                  return mongoOps.setDataset( userCollection, userInfo ).then( () => resolve( userInfo ) );
                 },
                 reason => reject( reason )
-            );
-            return;
-          }
+              );
+            }
 
-          // if salt hash doesn't match reject
-          helpers.encryptKey( token, userInfo.salt ).then(
-            encryptedKey => {
-              if ( encryptedKey === userInfo.token )
-                resolve( userInfo );
-              else
-                reject( 'token does not match' );
-            },
-            reason => reject( reason ) );
+            // if salt hash doesn't match reject
+            return helpers.encryptKey( token, userInfo.salt )
+            .then(
+              encryptedKey => {
+                if ( encryptedKey === userInfo.token )
+                  resolve( userInfo );
+                else
+                  reject( 'token does not match' );
+                  return userInfo;
+              }
+            );
 
         } );  // end mongoOps.getDataset().then()
 
