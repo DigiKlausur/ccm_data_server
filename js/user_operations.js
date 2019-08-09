@@ -195,7 +195,7 @@ function _getUserInfo( mongoInstance, tokenString, courseId ) {
         }
 
         // get user info
-        mongoOps.getDataset( userCollection, username )
+        const getUserPromise = mongoOps.getDataset( userCollection, username )
         .then(
           userInfo => {
             if ( !userInfo ) {
@@ -204,42 +204,37 @@ function _getUserInfo( mongoInstance, tokenString, courseId ) {
             }
             return userInfo;
           }
-        )
-
-        // get user's role for the course
-        .then( userInfo => _getUserRoleInCourse( mongoInstance, userInfo, courseId ) )
+        );
 
         // handle user token
-        .then(
+        const handleTokenPromise = getUserPromise.then(
           async userInfo => {
             // if no user or no salt/hash for user create new TODO: interface for resetting salt/hash
             if ( !userInfo.salt || !userInfo.token ) {
-              return helpers.createSaltHashPair( token )
-              .then(
+              return helpers.createSaltHashPair( token ) .then(
                 async saltHashPair => {
                   // update userInfo
                   Object.assign( userInfo, saltHashPair );
 
                   // write new user info to database
-                  return mongoOps.setDataset( userCollection, userInfo ).then( () => resolve( userInfo ) );
-                },
-                reason => reject( reason )
+                  return mongoOps.setDataset( userCollection, userInfo ).then( () => userInfo );
+                }
               );
             }
 
             // if salt hash doesn't match reject
-            return helpers.encryptKey( token, userInfo.salt )
-            .then(
+            return helpers.encryptKey( token, userInfo.salt ).then(
               encryptedKey => {
-                if ( encryptedKey === userInfo.token )
-                  resolve( userInfo );
-                else
-                  reject( 'token does not match' );
-                  return userInfo;
+                if ( encryptedKey === userInfo.token ) return userInfo;
+                else return Promise.reject( 'token does not match' );
               }
             );
+        } );
 
-        } );  // end mongoOps.getDataset().then()
+        // get user's role for the course and resolve 'userInfo' or reject
+        handleTokenPromise
+        .then( userInfo => _getUserRoleInCourse( mongoInstance, userInfo, courseId ) )
+        .then( userInfo => resolve( userInfo ), reason => reject( reason ) );
 
       } );  // end collection.count()
 
