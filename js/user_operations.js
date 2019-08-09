@@ -99,23 +99,25 @@ async function _getUserRoleInCourse( mongoInstance, userInfo, courseId ) {
       }
 
       // check if role info for course exist, if not create empty document
-      const courseRoleDoc = courseCollection && courseCollection[ courseId ]
-                          ? courseCollection[ courseId ] : { 'key': courseId, 'roles': {} };
+      mongoOps.getDataset( courseCollection, courseId )
+      .then( courseDoc => {
+        if ( !courseDoc ) courseDoc = { 'key': courseId, 'roles': {}, 'collections': {} };
 
-      if ( courseRoleDoc.roles[ userInfo.username ] ) {
-        // user exist in course role document => resolve and return
-        userInfo.role = courseRoleDoc.roles[ userInfo.username ];
-        resolve( userInfo );
-        return;
-      }
+        if ( courseDoc.roles && courseDoc.roles[ userInfo.username ] ) {
+          // user exist in course role document => resolve 'userInfo' and return
+          userInfo.role = courseDoc.roles[ userInfo.username ];
+          return userInfo;
+        }
 
-      // user not already in role collection for this class => create new entry
-      const userRole = userInfo[ 'is_admin' ] ? 'admin' : _getDefaultRole();
-      courseRoleDoc.roles[ userInfo.username ] = userRole;
-      userInfo.role = userRole;
+        // user not already in role collection for this class => create new entry
+        const userRole = userInfo[ 'is_admin' ] ? 'admin' : _getDefaultRole();
+        courseDoc.roles[ userInfo.username ] = userRole;
+        userInfo.role = userRole;
 
-      // update role collection with new user
-      mongoOps.setDataset( courseCollection, courseRoleDoc ).then( () => resolve( userInfo ) );
+        // update course collection with user role info and resolve 'userInfo'
+        return mongoOps.setDataset( courseCollection, courseDoc ).then( () => userInfo );
+      } )
+      .then( userInfo => resolve( userInfo ) );
     } );
   } );
 }  // end _getUserRoleInCourse()

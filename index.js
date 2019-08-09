@@ -185,10 +185,51 @@ connectMongoDB( () => {
       const courseId = chunks[1];
 
       // get user information
-      userOps.getUserInfo( mongodb, data.token, courseId ).then(
+      const userInfoProm = userOps.getUserInfo( mongodb, data.token, courseId );
+
+      // check that the document requested is part of the
+      const courseDocCheckProm = userInfoProm.then(
+        userInfo => {
+          return new Promise( ( resolve, reject ) => {
+            mongodb.collection( 'courses', ( err, courseCollection ) => {
+              if ( err ) {
+                reject( err );
+                return;
+              }
+
+              mongoOps.getDataset( courseCollection, courseId )
+              .then( courseDoc => {
+                if ( !courseDoc ) courseDoc = { 'key': courseId, 'roles': {}, 'collections': {} };
+
+                // if requested store is on record and belongs to the course, resolve
+                if ( courseDoc.collections[ data.store ] ) return userInfo;
+
+                // if user is admin, add store to course document
+                if ( userInfo[ 'is_admin' ] ) {
+                  courseDoc.collections[ data.store ] = true;
+                  return mongoOps.setDataset( courseCollection, courseDoc ).then( () => userInfo );
+                }
+
+                // reject
+                return Promise.reject( 'store does not belong to course' );
+              } )
+              .then(
+                userInfo => resolve( userInfo ),
+                reason => reject( reason ) );
+            } );
+          });
+        }
+      );
+
+      // handle data request
+      courseDocCheckProm.then(
         userInfo => {
           // get collection
-          mongodb.collection( data.store, ( err, collection ) => {
+          mongodb.collection( data.store, async ( err, collection ) => {
+            if ( err ) {
+              reject( err );
+              return;
+            }
 
             // determine and perform correct database operation
             if ( data.get ) {
@@ -222,10 +263,7 @@ connectMongoDB( () => {
               }
 
               // perform read operation
-              return mongoOps.getDataset( collection, data.get ).then( results => {
-                // call resolve on read resolve
-                return Promise.resolve( results );
-              });
+              return mongoOps.getDataset( collection, data.get );
             }  // end function get()
 
             /** creates or updates dataset and call resolve with created/updated dataset */
