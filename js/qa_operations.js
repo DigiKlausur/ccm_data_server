@@ -49,14 +49,11 @@ function _updateAnswerDoc( collection, username, setData ) {
         Object.keys( answerData.entries ).forEach( ansKey => {
           if ( ansKey === ansHash ) return;
           if ( answerData.entries[ ansKey  ][ 'authors'  ]
-                && username in answerData.entries[ ansKey ][ 'authors' ] ) {
-            console.log( `removing user '${ username }' ` +
-                          `from the author dict of answer '${ ansKey }'` );
+               && username in answerData.entries[ ansKey ][ 'authors' ] ) {
             delete answerData.entries[ ansKey ][ 'authors' ][ username ];
           }
           if ( !answerData.entries[ ansKey  ][ 'authors'  ]
-                || Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
-            console.log( `removing answer '${ ansKey }' for question '${ questionId }'` );
+               || Object.keys( answerData.entries[ ansKey ][ 'authors' ] ).length === 0 ) {
             delete answerData.entries[ ansKey ];
           }
         } );
