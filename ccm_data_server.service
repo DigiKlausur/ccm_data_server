@@ -1,7 +1,7 @@
 [Unit]
 Description=index.js - Handle database requests for DigiKlausur
 Documentation=https://github.com/DigiKlausur/ccm_data_server
-After=network.target
+After=mongod.service
 
 [Service]
 Type=simple
