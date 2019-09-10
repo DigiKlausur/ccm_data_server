@@ -67,6 +67,9 @@ the random string as its content
 ```
 # iptables -t nat -A PREROUTING -i <network_interface> -p tcp --dport 443 -j REDIRECT --to-port <port_num>
 ```
+* To make the rule persistent, after running the above command, you can install `iptables-persistent` (Debian & Ubuntu).
+  After installation, rules will be automatically loaded from the files `/etc/iptables/rules.v4` for IPv4 and
+  `/etc/iptables/rules.v6` for IPv6
 * Reload, enable and start the data service
 ```
 # systemctl daemon-reload
