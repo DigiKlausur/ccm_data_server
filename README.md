@@ -24,7 +24,9 @@ npm install
 
 ## Initialize/Reset Let's Encrypt Certificates
 
-Note
+Note: certificates may be generated somewhere else and copied to the server, as long as the host name
+(`digiklausur.ddns.net`) is correct. This may be neccessary if the public IP of the server does not have
+the HTTP port (80) open.
 
 Largely based on the [tutorial by David Mellul](https://itnext.io/node-express-letsencrypt-generate-a-free-ssl-certificate-and-run-an-https-server-in-5-minutes-a730fbe528ca)
 * Run `certbot` in manual mode as `root`
